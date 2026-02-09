@@ -1,0 +1,563 @@
+[
+  {
+    "table": "bills",
+    "field": "bill_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "bigint",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "user_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "meter_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "billing_month",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "total_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "total_amount",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "due_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "payment_status",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "bills",
+    "field": "paid_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "created_at",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "timestamp",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "price_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "user_type",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "electricity_prices",
+    "field": "tier_level",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "min_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "max_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "unit_price",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "effective_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "is_current",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "tinyint",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "record_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "bigint",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "meter_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "reading_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "current_reading",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "previous_reading",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "peak_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "valley_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "record_status",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "electricity_records",
+    "field": "recorded_by",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "electricity_records",
+    "field": "created_at",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "timestamp",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "meter_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "user_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "meter_number",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "meters",
+    "field": "meter_type",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "meters",
+    "field": "capacity",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "installation_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "status",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "payment_records",
+    "field": "payment_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "bigint",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "bill_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "bigint",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "user_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "payment_amount",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "payment_method",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "payment_records",
+    "field": "payment_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "timestamp",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "transaction_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "payment_records",
+    "field": "status",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "user_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "users",
+    "field": "username",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "password",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "real_name",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "phone",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "email",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "address",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "text",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "user_type",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "created_at",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "timestamp",
+    "quality_tags": [
+      "time"
+    ]
+  }
+]

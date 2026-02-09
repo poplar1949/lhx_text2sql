@@ -1,0 +1,5477 @@
+==================================================PROJECT STRUCTURE (项目结构)==================================================lhx_text2sql/
+    README.md
+    requirements.txt
+    trans_to_one.py
+    app/
+        api.py
+        gui.py
+        main.py
+        __init__.py
+        core/
+            config.py
+            engine.py
+            models.py
+            schema.py
+            __init__.py
+            audit/
+                audit_log.py
+                __init__.py
+            compile/
+                allowlist.py
+                compiler.py
+                __init__.py
+            execute/
+                answer.py
+                executor.py
+                quality.py
+                __init__.py
+            llm/
+                client.py
+                mock_client.py
+                __init__.py
+            planning/
+                planner.py
+                repair.py
+                validator.py
+                __init__.py
+            rag/
+                faiss_store.py
+                kb_join.py
+                kb_metric.py
+                kb_schema.py
+                kb_template.py
+                pgvector_store.py
+                vector_store.py
+                __init__.py
+    data/
+        join_kb.json
+        metric_kb.json
+        schema_kb.json
+        template_kb.json
+    prompts/
+        answer_generate.txt
+        plan_generate.txt
+        plan_repair.txt
+    schemas/
+        plan_dsl.schema.json
+    scripts/
+        generate_generic_kb.py
+        sync_kb_from_mysql.py
+    tests/
+        test_compiler_guard.py
+        test_join_path.py
+        test_llm_json_guard.py
+        test_schema_validation.py
+
+
+
+==================================================
+FILE PATH: README.md
+==================================================
+# Power Text2SQL (LLM + RAG + Query Plan DSL)
+
+This MVP implements a power-domain Text2SQL system where the LLM only outputs a JSON Query Plan DSL and SQL is compiled by a guarded compiler. It uses RAG knowledge bases (schema/join/metric/template), validation + repair, audit logging, safe execution, and result quality checks.
+
+## Requirements
+- Python 3.10+
+- MySQL 8.x for production execution
+
+## Install
+```bash
+pip install -r requirements.txt
+```
+
+## Run (GUI only)
+Launch the desktop UI (no HTTP server needed):
+```bash
+python -m app.gui
+```
+
+## MySQL config
+By default, `TEXT2SQL_USE_MOCK_DB=true` so the API returns a demo response without a real database. To use MySQL:
+```bash
+set TEXT2SQL_USE_MOCK_DB=false
+set TEXT2SQL_MYSQL_HOST=localhost
+set TEXT2SQL_MYSQL_PORT=3306
+set TEXT2SQL_MYSQL_USER=root
+set TEXT2SQL_MYSQL_PASSWORD=your_password
+set TEXT2SQL_MYSQL_DATABASE=power
+```
+
+## LLM (SiliconFlow / DeepSeek)
+Set the LLM client to real mode and provide SiliconFlow credentials.
+
+### Option A: .env file (recommended)
+Create a `.env` file (you can copy `.env.example`) and fill in your values:
+```bash
+copy .env.example .env
+```
+Then edit `.env`:
+```
+TEXT2SQL_LLM_MODE=real
+TEXT2SQL_LLM_BASE_URL=https://api.siliconflow.cn/v1
+TEXT2SQL_LLM_API_KEY=your_api_key
+TEXT2SQL_LLM_MODEL=your_deepseek_model_name
+```
+
+### Option B: set env vars in terminal
+```bash
+set TEXT2SQL_LLM_MODE=real
+set TEXT2SQL_LLM_BASE_URL=https://api.siliconflow.cn/v1
+set TEXT2SQL_LLM_API_KEY=your_api_key
+set TEXT2SQL_LLM_MODEL=deepseek-model-name
+```
+Replace `deepseek-model-name` with the model name provided by SiliconFlow (e.g., a DeepSeek model).
+
+## Knowledge bases
+- `data/schema_kb.json`: schema semantics
+- `data/join_kb.json`: join paths
+- `data/metric_kb.json`: metrics with definitions and required fields
+- `data/template_kb.json`: template rules and constraints
+
+## Response fields
+- `plan_dsl`: validated Query Plan DSL (JSON)
+- `sql`: compiled MySQL SQL (sqlglot)
+- `data_preview`: up to 20 rows
+- `answer_text`: natural language summary (includes metric definition + unit + time range)
+- `debug`: evidence summary + validation errors
+
+## Project layout
+```
+app/
+  core/
+    config.py
+    models.py
+    schema.py
+    rag/
+    planning/
+    compile/
+    execute/
+    llm/
+    audit/
+prompts/
+  plan_generate.txt
+  plan_repair.txt
+  answer_generate.txt
+schemas/
+  plan_dsl.schema.json
+data/
+  schema_kb.json
+  join_kb.json
+  metric_kb.json
+  template_kb.json
+tests/
+```
+
+
+==================================================
+FILE PATH: requirements.txt
+==================================================
+pydantic==1.10.13
+jsonschema==4.19.2
+sqlglot==23.8.1
+pymysql==1.1.0
+pytest==7.4.3
+PyQt5==5.15.10
+python-dotenv==1.0.1
+
+
+==================================================
+FILE PATH: trans_to_one.py
+==================================================
+import os
+
+# ================= 配置区域 =================
+
+# 1. 输出的汇总文件名
+OUTPUT_FILENAME = "project_context_for_ai.txt"
+
+# 2. 需要读取的文件后缀 (白名单模式，只读取代码和配置文件)
+# 根据你的项目需求可以自由添加，例如 .c, .cpp, .java, .sql 等
+ALLOWED_EXTENSIONS = {
+    # Python
+    '.py', 
+    # Web / JS
+    '.js', '.jsx', '.ts', '.tsx', '.vue', '.html', '.css', '.scss', '.json',
+    # 配置 / 文档
+    '.xml', '.yaml', '.yml', '.md', '.txt', '.ini', '.conf', '.env'
+}
+
+# 3. 需要忽略的目录 (完全跳过，不遍历内部)
+IGNORE_DIRS = {
+    '.git', '.svn', '.hg', '.idea', '.vscode', 
+    '__pycache__', 'node_modules', 'venv', 'env', '.venv',
+    'dist', 'build', 'coverage', 'migrations'
+}
+
+# 4. 需要忽略的具体文件名
+IGNORE_FILES = {
+    OUTPUT_FILENAME, 'merge_to_one_file.py', 'package-lock.json', 'yarn.lock'
+}
+
+# ===========================================
+
+def is_allowed_file(filename):
+    """检查文件后缀是否在白名单中，且不在忽略列表中"""
+    if filename in IGNORE_FILES:
+        return False
+    _, ext = os.path.splitext(filename)
+    return ext.lower() in ALLOWED_EXTENSIONS
+
+def generate_tree(start_path):
+    """生成目录树字符串"""
+    tree_str = []
+    for root, dirs, files in os.walk(start_path):
+        # 过滤忽略的目录
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        
+        level = root.replace(start_path, '').count(os.sep)
+        indent = ' ' * 4 * (level)
+        tree_str.append(f"{indent}{os.path.basename(root)}/")
+        subindent = ' ' * 4 * (level + 1)
+        for f in files:
+            if is_allowed_file(f):
+                tree_str.append(f"{subindent}{f}")
+    return "\n".join(tree_str)
+
+def merge_files():
+    root_dir = os.getcwd()
+    output_path = os.path.join(root_dir, OUTPUT_FILENAME)
+    
+    print(f"🚀 开始合并代码...")
+    print(f"📂 扫描目录: {root_dir}")
+    
+    merged_content = []
+    
+    # 1. 写入项目结构树
+    print("🌳 生成项目结构...")
+    tree = generate_tree(root_dir)
+    merged_content.append("=" * 50)
+    merged_content.append("PROJECT STRUCTURE (项目结构)")
+    merged_content.append("=" * 50)
+    merged_content.append(tree)
+    merged_content.append("\n\n")
+
+    # 2. 遍历并读取文件内容
+    file_count = 0
+    
+    for root, dirs, files in os.walk(root_dir):
+        # 修改 dirs 列表以跳过忽略的目录
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        
+        for file in files:
+            if not is_allowed_file(file):
+                continue
+                
+            file_path = os.path.join(root, file)
+            rel_path = os.path.relpath(file_path, root_dir)
+            
+            try:
+                # 尝试以 UTF-8 读取
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    
+                # 格式化写入：添加清晰的文件头
+                header = f"\n\n{'='*50}\nFILE PATH: {rel_path}\n{'='*50}\n"
+                merged_content.append(header)
+                merged_content.append(content)
+                
+                print(f"   + 读取: {rel_path}")
+                file_count += 1
+                
+            except UnicodeDecodeError:
+                print(f"⚠️  跳过 (编码非UTF-8): {rel_path}")
+            except Exception as e:
+                print(f"❌ 读取错误 {rel_path}: {e}")
+
+    # 3. 写入最终文件
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("".join(merged_content))
+        
+        print("-" * 30)
+        print(f"✅ 合并完成！")
+        print(f"📄 共合并文件数: {file_count}")
+        print(f"💾 输出文件: {OUTPUT_FILENAME}")
+        print("👉 你可以直接打开该文件，全选复制发送给 AI。")
+        
+    except Exception as e:
+        print(f"❌ 写入输出文件失败: {e}")
+
+if __name__ == '__main__':
+    merge_files()
+
+==================================================
+FILE PATH: app\api.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\gui.py
+==================================================
+import json
+import sys
+from typing import Any, Dict
+
+from PyQt5 import QtCore, QtWidgets
+
+from app.core.engine import Text2SQLEngine
+
+
+class LocalWorker(QtCore.QThread):
+    result = QtCore.pyqtSignal(dict)
+    error = QtCore.pyqtSignal(str)
+
+    def __init__(self, engine: Text2SQLEngine, payload: Dict[str, Any]) -> None:
+        super().__init__()
+        self.engine = engine
+        self.payload = payload
+
+    def run(self) -> None:
+        try:
+            question = self.payload.get("question", "")
+            user_context = self.payload.get("user_context", {})
+            time_range = self.payload.get("time_range")
+            data = self.engine.run_query(question, user_context, time_range)
+            self.result.emit(data)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Text2SQL Planner UI")
+        self.resize(1100, 700)
+        self.engine = Text2SQLEngine()
+        self._worker: LocalWorker | None = None
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        central = QtWidgets.QWidget()
+        root = QtWidgets.QVBoxLayout(central)
+
+        form = QtWidgets.QFormLayout()
+        self.question_edit = QtWidgets.QLineEdit()
+        self.role_edit = QtWidgets.QLineEdit("analyst")
+        self.tenant_edit = QtWidgets.QLineEdit("demo")
+        self.start_edit = QtWidgets.QLineEdit("2024-01-01")
+        self.end_edit = QtWidgets.QLineEdit("2024-01-31")
+        form.addRow("Question", self.question_edit)
+        form.addRow("Role", self.role_edit)
+        form.addRow("Tenant", self.tenant_edit)
+        form.addRow("Start Date", self.start_edit)
+        form.addRow("End Date", self.end_edit)
+        root.addLayout(form)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        self.send_btn = QtWidgets.QPushButton("Run Query")
+        self.test_btn = QtWidgets.QPushButton("Test Connections")
+        self.clear_btn = QtWidgets.QPushButton("Clear")
+        btn_row.addWidget(self.send_btn)
+        btn_row.addWidget(self.test_btn)
+        btn_row.addWidget(self.clear_btn)
+        btn_row.addStretch(1)
+        root.addLayout(btn_row)
+
+        self.status_label = QtWidgets.QLabel("Ready.")
+        root.addWidget(self.status_label)
+
+        self.tabs = QtWidgets.QTabWidget()
+        self.answer_text = self._make_readonly_text()
+        self.sql_text = self._make_readonly_text()
+        self.plan_text = self._make_readonly_text()
+        self.debug_text = self._make_readonly_text()
+        self.raw_text = self._make_readonly_text()
+        self.preview_table = QtWidgets.QTableWidget()
+        self.preview_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.preview_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+
+        self.tabs.addTab(self.answer_text, "Answer")
+        self.tabs.addTab(self.sql_text, "SQL")
+        self.tabs.addTab(self.plan_text, "Plan DSL")
+        self.tabs.addTab(self.preview_table, "Data Preview")
+        self.tabs.addTab(self.debug_text, "Debug")
+        self.tabs.addTab(self.raw_text, "Raw JSON")
+        root.addWidget(self.tabs, 1)
+
+        self.setCentralWidget(central)
+
+        self.send_btn.clicked.connect(self.send_query)
+        self.test_btn.clicked.connect(self.test_connections)
+        self.clear_btn.clicked.connect(self.clear_output)
+
+    @staticmethod
+    def _make_readonly_text() -> QtWidgets.QPlainTextEdit:
+        widget = QtWidgets.QPlainTextEdit()
+        widget.setReadOnly(True)
+        return widget
+
+    def send_query(self) -> None:
+        if self._worker and self._worker.isRunning():
+            self._set_status("Query already running.")
+            return
+        payload = self._build_payload()
+        self._worker = LocalWorker(self.engine, payload)
+        self._worker.result.connect(self._handle_result)
+        self._worker.error.connect(self._handle_error)
+        self._worker.start()
+        self._set_status("Query running...")
+
+    def clear_output(self) -> None:
+        self.answer_text.clear()
+        self.sql_text.clear()
+        self.plan_text.clear()
+        self.debug_text.clear()
+        self.raw_text.clear()
+        self.preview_table.clear()
+        self.preview_table.setRowCount(0)
+        self.preview_table.setColumnCount(0)
+
+    def _handle_result(self, data: Dict[str, Any]) -> None:
+        self._set_status("Response received.")
+        self.answer_text.setPlainText(data.get("answer_text", ""))
+        self.sql_text.setPlainText(data.get("sql", ""))
+        plan = data.get("plan_dsl", {})
+        debug = data.get("debug", {})
+        self.plan_text.setPlainText(json.dumps(plan, ensure_ascii=False, indent=2))
+        self.debug_text.setPlainText(json.dumps(debug, ensure_ascii=False, indent=2))
+        self.raw_text.setPlainText(
+            json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        )
+        self._fill_preview_table(data.get("data_preview", {}))
+
+    def _handle_error(self, message: str) -> None:
+        self._set_status(f"Error: {message}")
+        QtWidgets.QMessageBox.warning(self, "Query Error", message)
+
+    def _fill_preview_table(self, preview: Dict[str, Any]) -> None:
+        columns = preview.get("columns", []) or []
+        rows = preview.get("rows", []) or []
+        self.preview_table.setColumnCount(len(columns))
+        self.preview_table.setHorizontalHeaderLabels([str(c) for c in columns])
+        self.preview_table.setRowCount(len(rows))
+        for r_idx, row in enumerate(rows):
+            for c_idx, value in enumerate(row):
+                item = QtWidgets.QTableWidgetItem(str(value))
+                self.preview_table.setItem(r_idx, c_idx, item)
+        self.preview_table.resizeColumnsToContents()
+
+    def _build_payload(self) -> Dict[str, Any]:
+        question = self.question_edit.text().strip()
+        role = self.role_edit.text().strip()
+        tenant = self.tenant_edit.text().strip()
+        start = self.start_edit.text().strip()
+        end = self.end_edit.text().strip()
+        payload = {
+            "question": question,
+            "user_context": {"role": role, "tenant": tenant},
+        }
+        if start and end:
+            payload["time_range"] = {"start": start, "end": end}
+        return payload
+
+    def _set_status(self, text: str) -> None:
+        self.status_label.setText(text)
+
+    def test_connections(self) -> None:
+        self._set_status("Testing connections...")
+        results = self.engine.test_connections()
+        message = f"LLM: {results.get('llm')}\nMySQL: {results.get('mysql')}"
+        self._set_status("Connection test done.")
+        QtWidgets.QMessageBox.information(self, "Connection Test", message)
+
+def main() -> None:
+    app = QtWidgets.QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()
+
+
+==================================================
+FILE PATH: app\main.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\__init__.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\config.py
+==================================================
+from functools import lru_cache
+
+from pydantic import BaseSettings
+
+
+class Settings(BaseSettings):
+    app_name: str = "Power Text2SQL"
+    prompt_dir: str = "prompts"
+    schema_path: str = "schemas/plan_dsl.schema.json"
+    schema_kb_path: str = "data/schema_kb.json"
+    join_kb_path: str = "data/join_kb.json"
+    metric_kb_path: str = "data/metric_kb.json"
+    template_kb_path: str = "data/template_kb.json"
+    audit_log_path: str = "data/audit_logs.jsonl"
+
+    llm_mode: str = "mock"
+    llm_base_url: str = "https://api.siliconflow.cn/v1"
+    llm_api_key: str = ""
+    llm_model: str = ""
+    llm_timeout: int = 30
+    llm_max_retries: int = 2
+    llm_force_json: bool = True
+    llm_extract_json: bool = True
+    llm_plan_trim_top_k: int = 2
+    llm_plan_retry_on_timeout: bool = True
+    use_mock_db: bool = True
+    fixed_metric_id: str = ""
+
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_user: str = "root"
+    mysql_password: str = "root"
+    mysql_database: str = "power"
+    mysql_charset: str = "utf8mb4"
+    mysql_connect_timeout: int = 5
+    mysql_read_timeout: int = 30
+
+    rag_top_k: int = 5
+    rag_top_k_second: int = 8
+
+    class Config:
+        env_prefix = "TEXT2SQL_"
+        case_sensitive = False
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()
+
+
+==================================================
+FILE PATH: app\core\engine.py
+==================================================
+import time
+from typing import Any, Dict, Optional
+
+from app.core.audit.audit_log import AuditLogger
+from app.core.compile.compiler import SqlCompiler
+from app.core.config import get_settings
+from app.core.execute.answer import AnswerGenerator
+from app.core.execute.executor import QueryExecutor
+from app.core.llm.client import RealLLMClient
+from app.core.llm.mock_client import MockLLMClient
+from app.core.planning.planner import Planner
+from app.core.planning.repair import PlanRepair
+from app.core.planning.validator import PlanValidator
+from app.core.rag.faiss_store import SimpleInMemoryVectorStore
+from app.core.rag.kb_join import JoinGraphKB
+from app.core.rag.kb_metric import MetricKB
+from app.core.rag.kb_schema import SchemaKB
+from app.core.rag.kb_template import TemplateKB
+from app.core.schema import load_schema
+
+
+class Text2SQLEngine:
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        schema = load_schema(self.settings.schema_path)
+
+        self.schema_kb = SchemaKB(self.settings.schema_kb_path, SimpleInMemoryVectorStore())
+        self.join_kb = JoinGraphKB(self.settings.join_kb_path, SimpleInMemoryVectorStore())
+        self.metric_kb = MetricKB(self.settings.metric_kb_path, SimpleInMemoryVectorStore())
+        self.template_kb = TemplateKB(self.settings.template_kb_path, SimpleInMemoryVectorStore())
+
+        self.llm_client = self._init_llm_client()
+        self.validator = PlanValidator(schema)
+        self.repairer = PlanRepair(
+            self.llm_client, schema, prompt_path=f"{self.settings.prompt_dir}/plan_repair.txt"
+        )
+        self.planner = Planner(
+            settings=self.settings,
+            llm_client=self.llm_client,
+            schema_kb=self.schema_kb,
+            join_kb=self.join_kb,
+            metric_kb=self.metric_kb,
+            template_kb=self.template_kb,
+            validator=self.validator,
+            repairer=self.repairer,
+            prompt_path=f"{self.settings.prompt_dir}/plan_generate.txt",
+        )
+
+        self.compiler = SqlCompiler()
+        self.executor = QueryExecutor(self.settings)
+        self.answer_generator = AnswerGenerator(
+            self.llm_client, prompt_path=f"{self.settings.prompt_dir}/answer_generate.txt"
+        )
+        self.audit_logger = AuditLogger(self.settings.audit_log_path)
+
+    def _init_llm_client(self):
+        if self.settings.llm_mode == "mock":
+            return MockLLMClient()
+        if self.settings.llm_mode == "no_llm":
+            return MockLLMClient()
+        try:
+            return RealLLMClient()
+        except ValueError:
+            self.settings.llm_mode = "mock"
+            return MockLLMClient()
+
+    def run_query(
+        self,
+        question: str,
+        user_context: Optional[Dict[str, Any]] = None,
+        time_range: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        user_context = user_context or {}
+        audit_id = self.audit_logger.new_id()
+        start_time = time.time()
+        stage = "init"
+        try:
+            stage = "plan"
+            plan_result = self.planner.generate_plan(
+                question=question,
+                user_context=user_context,
+                time_range=time_range,
+            )
+            stage = "compile"
+            sql = self.compiler.compile(plan_result.plan, plan_result.evidence)
+            stage = "execute"
+            exec_result = self.executor.execute(sql, plan_result.plan, plan_result.evidence)
+            stage = "answer"
+            answer_text = self.answer_generator.generate(
+                question=question,
+                plan_dsl=plan_result.plan,
+                sql=sql,
+                metric_def=plan_result.metric_def,
+                data_preview=exec_result.data_preview,
+                quality_warnings=exec_result.quality_warnings,
+            )
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            self.audit_logger.write(
+                audit_id=audit_id,
+                question=question,
+                user_context=user_context,
+                evidence_summary=plan_result.evidence_summary,
+                plan_initial=plan_result.plan_initial,
+                plan_final=plan_result.plan.dict(),
+                validation_errors=[e.dict() for e in plan_result.validation_errors],
+                sql=sql,
+                elapsed_ms=elapsed_ms,
+                error=None,
+            )
+            return {
+                "audit_log_id": audit_id,
+                "plan_dsl": plan_result.plan.dict(),
+                "sql": sql,
+                "data_preview": exec_result.data_preview.dict(),
+                "answer_text": answer_text,
+                "debug": {
+                    "evidence_summary": plan_result.evidence_summary,
+                    "validation_errors": [e.dict() for e in plan_result.validation_errors],
+                },
+            }
+        except Exception as exc:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            error_text = f"[{stage}] {exc}"
+            self.audit_logger.write(
+                audit_id=audit_id,
+                question=question,
+                user_context=user_context,
+                evidence_summary="",
+                plan_initial=None,
+                plan_final=None,
+                validation_errors=[],
+                sql=None,
+                elapsed_ms=elapsed_ms,
+                error=error_text,
+            )
+            raise ValueError(error_text) from exc
+
+    def test_connections(self) -> Dict[str, str]:
+        results: Dict[str, str] = {}
+        if self.settings.llm_mode == "mock":
+            results["llm"] = "mock"
+        else:
+            try:
+                client = RealLLMClient()
+                _ = client.generate_text("ping")
+                results["llm"] = "ok"
+            except Exception as exc:
+                results["llm"] = f"error: {exc}"
+
+        if self.settings.use_mock_db:
+            results["mysql"] = "mock"
+        else:
+            try:
+                import pymysql
+
+                conn = pymysql.connect(
+                    host=self.settings.mysql_host,
+                    port=self.settings.mysql_port,
+                    user=self.settings.mysql_user,
+                    password=self.settings.mysql_password,
+                    database=self.settings.mysql_database,
+                    charset=self.settings.mysql_charset,
+                    connect_timeout=self.settings.mysql_connect_timeout,
+                    read_timeout=self.settings.mysql_read_timeout,
+                )
+                try:
+                    with conn.cursor() as cursor:
+                        cursor.execute("SELECT 1")
+                        cursor.fetchone()
+                finally:
+                    conn.close()
+                results["mysql"] = "ok"
+            except Exception as exc:
+                results["mysql"] = f"error: {exc}"
+        return results
+
+
+==================================================
+FILE PATH: app\core\models.py
+==================================================
+from typing import Any, Dict, List, Optional, Literal
+
+from pydantic import BaseModel, Field, conint, confloat
+
+
+class Dimension(BaseModel):
+    table: str
+    field: str
+
+    class Config:
+        extra = "forbid"
+
+
+class Filter(BaseModel):
+    table: str
+    field: str
+    op: Literal["=", "!=", ">", ">=", "<", "<=", "in", "like", "between"]
+    value: Any
+
+    class Config:
+        extra = "forbid"
+
+
+class SortSpec(BaseModel):
+    by: str
+    order: Literal["asc", "desc"]
+
+    class Config:
+        extra = "forbid"
+
+
+class OutputSpec(BaseModel):
+    format: Literal["table", "single_value"]
+    chart_suggest: Literal["line", "bar", "heatmap", "none"]
+
+    class Config:
+        extra = "forbid"
+
+
+class TimeRange(BaseModel):
+    start: str
+    end: str
+
+    class Config:
+        extra = "forbid"
+
+
+class PlanDSL(BaseModel):
+    version: Literal["1.0"]
+    intent: Literal["trend", "aggregate", "rank", "compare", "detail"]
+    metric_id: str
+    metric_params: Dict[str, Any] = Field(default_factory=dict)
+    dimensions: List[Dimension]
+    time_range: TimeRange
+    time_grain: Literal["15m", "hour", "day", "week", "month"]
+    filters: List[Filter]
+    join_path_id: str
+    sort: Optional[SortSpec] = None
+    limit: Optional[conint(ge=1, le=10000)] = None
+    output: OutputSpec
+    confidence: confloat(ge=0, le=1)
+    clarifications: List[str]
+    errors_unresolved: Optional[List[str]] = None
+
+    class Config:
+        extra = "forbid"
+
+
+class MetricDef(BaseModel):
+    metric_id: str
+    name: str
+    definition: str
+    formula: str
+    required_fields: List[str]
+    default_time_grain: str
+    unit: str
+
+    class Config:
+        extra = "forbid"
+
+
+class SchemaEntity(BaseModel):
+    table: str
+    field: str
+    field_desc: str
+    aliases: List[str]
+    unit: str
+    data_type: str
+    quality_tags: List[str]
+
+    class Config:
+        extra = "forbid"
+
+
+class JoinEdge(BaseModel):
+    left_table: str
+    left_field: str
+    right_table: str
+    right_field: str
+    join_type: str
+
+    class Config:
+        extra = "forbid"
+
+
+class JoinPath(BaseModel):
+    join_path_id: str
+    description: str
+    tables: List[str]
+    edges: List[JoinEdge]
+
+    class Config:
+        extra = "forbid"
+
+
+class TemplateRule(BaseModel):
+    template_id: str
+    intent: str
+    allowed_aggs: List[str]
+    allowed_funcs: List[str]
+    required_clauses: List[str]
+
+    class Config:
+        extra = "forbid"
+
+
+class EvidenceBundle(BaseModel):
+    metric_candidates: List[MetricDef]
+    schema_candidates: List[SchemaEntity]
+    join_paths: List[JoinPath]
+    template_rules: List[TemplateRule]
+
+    class Config:
+        extra = "forbid"
+
+
+class ValidationError(BaseModel):
+    code: str
+    message: str
+    field_path: str
+    suggestions: List[str] = Field(default_factory=list)
+
+    class Config:
+        extra = "forbid"
+
+
+class DataPreview(BaseModel):
+    columns: List[str]
+    rows: List[List[Any]]
+
+    class Config:
+        extra = "forbid"
+
+
+class DebugInfo(BaseModel):
+    evidence_summary: str
+    validation_errors: List[ValidationError] = Field(default_factory=list)
+
+    class Config:
+        extra = "forbid"
+
+
+class QueryRequest(BaseModel):
+    question: str
+    user_context: Dict[str, Any] = Field(default_factory=dict)
+    time_range: Optional[TimeRange] = None
+
+    class Config:
+        extra = "forbid"
+
+
+class QueryResponse(BaseModel):
+    audit_log_id: str
+    plan_dsl: Dict[str, Any]
+    sql: str
+    data_preview: DataPreview
+    answer_text: str
+    debug: DebugInfo
+
+    class Config:
+        extra = "forbid"
+
+
+==================================================
+FILE PATH: app\core\schema.py
+==================================================
+import json
+from typing import List
+
+from jsonschema import Draft7Validator
+
+from app.core.models import ValidationError
+
+
+def load_schema(path: str) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def validate_plan(plan: dict, schema: dict) -> List[ValidationError]:
+    validator = Draft7Validator(schema)
+    errors: List[ValidationError] = []
+    for err in validator.iter_errors(plan):
+        field_path = ".".join([str(p) for p in err.path]) or "$"
+        errors.append(
+            ValidationError(
+                code="schema",
+                message=err.message,
+                field_path=field_path,
+                suggestions=[],
+            )
+        )
+    return errors
+
+
+==================================================
+FILE PATH: app\core\__init__.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\audit\audit_log.py
+==================================================
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
+from uuid import uuid4
+
+
+class AuditLogger:
+    def __init__(self, path: str) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def new_id() -> str:
+        return str(uuid4())
+
+    def write(
+        self,
+        audit_id: str,
+        question: str,
+        user_context: Dict[str, Any],
+        evidence_summary: str,
+        plan_initial: Optional[Dict[str, Any]],
+        plan_final: Optional[Dict[str, Any]],
+        validation_errors: list,
+        sql: Optional[str],
+        elapsed_ms: int,
+        error: Optional[str],
+    ) -> None:
+        record = {
+            "audit_log_id": audit_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "question": question,
+            "user_context": user_context,
+            "evidence_summary": evidence_summary,
+            "plan_initial": plan_initial,
+            "plan_final": plan_final,
+            "validation_errors": validation_errors,
+            "sql": sql,
+            "elapsed_ms": elapsed_ms,
+            "error": error,
+        }
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+==================================================
+FILE PATH: app\core\audit\__init__.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\compile\allowlist.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\compile\compiler.py
+==================================================
+from typing import List, Optional, Tuple
+
+from sqlglot import exp, parse_one
+
+from app.core.models import EvidenceBundle, MetricDef, PlanDSL
+
+
+JOIN_TYPE_MAP = {
+    "inner": "INNER",
+    "left": "LEFT",
+    "right": "RIGHT",
+}
+
+
+class SqlCompiler:
+    def compile(self, plan: PlanDSL, evidence: EvidenceBundle) -> str:
+        allowed_fields = self._build_allowed_fields(plan, evidence)
+        metric_def = self._get_metric_def(plan.metric_id, evidence)
+        time_table, time_field = self._pick_time_field(evidence, metric_def)
+        base_table = self._pick_base_table(plan, evidence, metric_def, time_table)
+
+        select_exprs: List[exp.Expression] = []
+        group_exprs: List[exp.Expression] = []
+
+        if plan.intent == "trend":
+            time_expr = self._time_bucket_expr(time_table, time_field, plan.time_grain)
+            time_alias = exp.alias_(time_expr, "time_bucket")
+            select_exprs.append(time_alias)
+            group_exprs.append(exp.column("time_bucket"))
+
+        for dim in plan.dimensions:
+            key = f"{dim.table}.{dim.field}"
+            if key not in allowed_fields:
+                raise ValueError(f"Dimension field not allowed: {key}")
+            col_expr = exp.column(dim.field, table=dim.table)
+            select_exprs.append(col_expr)
+            group_exprs.append(col_expr)
+
+        metric_expr = self._metric_expr(metric_def)
+        select_exprs.append(exp.alias_(metric_expr, plan.metric_id))
+
+        query = exp.select(*select_exprs).from_(base_table)
+
+        join_path = self._get_join_path(plan.join_path_id, evidence)
+        if join_path:
+            for edge in join_path.edges:
+                join_type = JOIN_TYPE_MAP.get(edge.join_type.lower(), "INNER")
+                on_expr = exp.EQ(
+                    this=exp.column(edge.left_field, table=edge.left_table),
+                    expression=exp.column(edge.right_field, table=edge.right_table),
+                )
+                query = query.join(edge.right_table, on=on_expr, join_type=join_type)
+
+        where_expr = self._time_range_filter(time_table, time_field, plan)
+        for fil in plan.filters:
+            key = f"{fil.table}.{fil.field}"
+            if key not in allowed_fields:
+                raise ValueError(f"Filter field not allowed: {key}")
+            where_expr = self._and(where_expr, self._filter_expr(fil))
+        if where_expr is not None:
+            query = query.where(where_expr)
+
+        if group_exprs:
+            query = query.group_by(*group_exprs)
+
+        if plan.sort:
+            order_expr = self._order_expr(plan, allowed_fields)
+            if order_expr is not None:
+                query = query.order_by(order_expr)
+        elif plan.intent == "trend":
+            # Ensure stable time ordering for trend queries.
+            query = query.order_by(exp.Ordered(this=exp.column("time_bucket"), desc=False))
+
+        limit = plan.limit or 200
+        query = query.limit(limit)
+
+        return query.sql(dialect="mysql")
+
+    @staticmethod
+    def _build_allowed_fields(plan: PlanDSL, evidence: EvidenceBundle) -> set:
+        allowed = {f"{s.table}.{s.field}" for s in evidence.schema_candidates}
+        metric_def = next((m for m in evidence.metric_candidates if m.metric_id == plan.metric_id), None)
+        if metric_def:
+            for field in metric_def.required_fields:
+                if "." in field:
+                    allowed.add(field)
+        join_path = next((j for j in evidence.join_paths if j.join_path_id == plan.join_path_id), None)
+        if join_path:
+            for edge in join_path.edges:
+                allowed.add(f"{edge.left_table}.{edge.left_field}")
+                allowed.add(f"{edge.right_table}.{edge.right_field}")
+        return allowed
+
+    @staticmethod
+    def _get_metric_def(metric_id: str, evidence: EvidenceBundle) -> MetricDef:
+        for metric in evidence.metric_candidates:
+            if metric.metric_id == metric_id:
+                return metric
+        raise ValueError("metric_id not found in evidence")
+
+    @staticmethod
+    def _pick_time_field(evidence: EvidenceBundle, metric_def: MetricDef) -> Tuple[str, str]:
+        for item in evidence.schema_candidates:
+            if item.field.lower() in {"ts", "timestamp", "event_time", "date", "dt"}:
+                return item.table, item.field
+            if item.data_type.lower() in {"datetime", "timestamp", "date"}:
+                return item.table, item.field
+        for field in metric_def.required_fields:
+            if field.endswith(".ts") or field.endswith(".date"):
+                table, fld = field.split(".", 1)
+                return table, fld
+        raise ValueError("No time field found for time_range")
+
+    @staticmethod
+    def _pick_base_table(
+        plan: PlanDSL,
+        evidence: EvidenceBundle,
+        metric_def: MetricDef,
+        time_table: str,
+    ) -> str:
+        join_path = next((j for j in evidence.join_paths if j.join_path_id == plan.join_path_id), None)
+        if join_path and join_path.edges:
+            return join_path.edges[0].left_table
+        if plan.dimensions:
+            return plan.dimensions[0].table
+        if metric_def.required_fields:
+            if "." in metric_def.required_fields[0]:
+                return metric_def.required_fields[0].split(".", 1)[0]
+        return time_table
+
+    @staticmethod
+    def _time_bucket_expr(table: str, field: str, grain: str) -> exp.Expression:
+        col_ref = f"{table}.{field}"
+        if grain == "15m":
+            expr = f"FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP({col_ref})/900)*900)"
+        elif grain == "hour":
+            expr = f"DATE_FORMAT({col_ref}, '%Y-%m-%d %H:00:00')"
+        elif grain == "day":
+            expr = f"DATE_FORMAT({col_ref}, '%Y-%m-%d')"
+        elif grain == "week":
+            expr = f"YEARWEEK({col_ref}, 1)"
+        elif grain == "month":
+            expr = f"DATE_FORMAT({col_ref}, '%Y-%m')"
+        else:
+            raise ValueError("Unsupported time_grain")
+        return parse_one(expr, dialect="mysql")
+
+    @staticmethod
+    def _metric_expr(metric_def: MetricDef) -> exp.Expression:
+        fields = metric_def.required_fields
+        if not fields:
+            raise ValueError("metric required_fields empty")
+        if len(fields) == 1:
+            table, field = fields[0].split(".", 1)
+            return exp.func("SUM", exp.column(field, table=table))
+        table_a, field_a = fields[0].split(".", 1)
+        table_b, field_b = fields[1].split(".", 1)
+        sum_a = exp.func("SUM", exp.column(field_a, table=table_a))
+        sum_b = exp.func("SUM", exp.column(field_b, table=table_b))
+        return exp.Div(this=sum_a, expression=exp.NullIf(this=sum_b, expression=exp.Literal.number(0)))
+
+    @staticmethod
+    def _time_range_filter(table: str, field: str, plan: PlanDSL) -> exp.Expression:
+        col_expr = exp.column(field, table=table)
+        return exp.Between(
+            this=col_expr,
+            low=exp.Literal.string(plan.time_range.start),
+            high=exp.Literal.string(plan.time_range.end),
+        )
+
+    @staticmethod
+    def _filter_expr(fil) -> exp.Expression:
+        col_expr = exp.column(fil.field, table=fil.table)
+        op = fil.op
+        value = fil.value
+        if op == "=":
+            return exp.EQ(this=col_expr, expression=SqlCompiler._literal(value))
+        if op == "!=":
+            return exp.NEQ(this=col_expr, expression=SqlCompiler._literal(value))
+        if op == ">":
+            return exp.GT(this=col_expr, expression=SqlCompiler._literal(value))
+        if op == ">=":
+            return exp.GTE(this=col_expr, expression=SqlCompiler._literal(value))
+        if op == "<":
+            return exp.LT(this=col_expr, expression=SqlCompiler._literal(value))
+        if op == "<=":
+            return exp.LTE(this=col_expr, expression=SqlCompiler._literal(value))
+        if op == "like":
+            return exp.Like(this=col_expr, expression=SqlCompiler._literal(value))
+        if op == "in":
+            if not isinstance(value, list):
+                raise ValueError("IN operator requires list value")
+            return exp.In(this=col_expr, expressions=[SqlCompiler._literal(v) for v in value])
+        if op == "between":
+            if not isinstance(value, list) or len(value) != 2:
+                raise ValueError("BETWEEN operator requires two values")
+            return exp.Between(
+                this=col_expr,
+                low=SqlCompiler._literal(value[0]),
+                high=SqlCompiler._literal(value[1]),
+            )
+        raise ValueError("Unsupported filter op")
+
+    @staticmethod
+    def _literal(value) -> exp.Expression:
+        if isinstance(value, (int, float)):
+            return exp.Literal.number(value)
+        return exp.Literal.string(str(value))
+
+    @staticmethod
+    def _and(left: Optional[exp.Expression], right: exp.Expression) -> exp.Expression:
+        if left is None:
+            return right
+        return exp.and_(left, right)
+
+    @staticmethod
+    def _order_expr(plan: PlanDSL, allowed_fields: set) -> Optional[exp.Expression]:
+        by = plan.sort.by
+        if by in {"metric", plan.metric_id}:
+            return exp.Ordered(this=exp.column(plan.metric_id), desc=plan.sort.order == "desc")
+        if by in {"time", "time_bucket"}:
+            if plan.intent != "trend":
+                return None
+            return exp.Ordered(this=exp.column("time_bucket"), desc=plan.sort.order == "desc")
+        if "." in by:
+            if by not in allowed_fields:
+                raise ValueError(f"Sort field not allowed: {by}")
+            table, field = by.split(".", 1)
+            return exp.Ordered(
+                this=exp.column(field, table=table), desc=plan.sort.order == "desc"
+            )
+        if any(field.endswith(f".{by}") for field in allowed_fields):
+            return exp.Ordered(this=exp.column(by), desc=plan.sort.order == "desc")
+        raise ValueError(f"Sort field not allowed: {by}")
+
+    @staticmethod
+    def _get_join_path(join_path_id: str, evidence: EvidenceBundle):
+        if join_path_id == "NONE":
+            return None
+        for jp in evidence.join_paths:
+            if jp.join_path_id == join_path_id:
+                return jp
+        return None
+
+
+==================================================
+FILE PATH: app\core\compile\__init__.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\execute\answer.py
+==================================================
+import json
+from typing import List
+
+from app.core.models import DataPreview, MetricDef, PlanDSL
+from app.core.llm.client import LLMClient
+
+
+class AnswerGenerator:
+    def __init__(self, llm_client: LLMClient, prompt_path: str) -> None:
+        self.llm_client = llm_client
+        self.prompt_template = ""
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                self.prompt_template = f.read()
+        except FileNotFoundError:
+            self.prompt_template = ""
+
+    def generate(
+        self,
+        question: str,
+        plan_dsl: PlanDSL,
+        sql: str,
+        metric_def: MetricDef,
+        data_preview: DataPreview,
+        quality_warnings: List[str],
+    ) -> str:
+        if self._can_use_llm():
+            payload = {
+                "question": question,
+                "plan_dsl": plan_dsl.dict(),
+                "sql": sql,
+                "metric_definition": metric_def.dict(),
+                "result_preview": data_preview.dict(),
+            }
+            prompt = f"{self.prompt_template}\n\n{json.dumps(payload, ensure_ascii=False, default=str)}"
+            try:
+                return self.llm_client.generate_text(prompt)
+            except NotImplementedError:
+                pass
+        return self._rule_based(plan_dsl, metric_def, data_preview, quality_warnings)
+
+    def _rule_based(
+        self,
+        plan_dsl: PlanDSL,
+        metric_def: MetricDef,
+        data_preview: DataPreview,
+        quality_warnings: List[str],
+    ) -> str:
+        if not data_preview.rows:
+            return (
+                f"结果为空。可能原因：时间范围 {plan_dsl.time_range.start} 至 {plan_dsl.time_range.end} 内无数据，"
+                "或筛选条件过窄，或存在数据质量问题。"
+                "建议调整时间范围或减少过滤条件后重试。"
+            )
+
+        metric_value = self._extract_metric_value(plan_dsl.metric_id, data_preview)
+        conclusion = "暂无" if metric_value is None else f"约为 {metric_value}"
+        warnings = "" if not quality_warnings else f"注意：{'；'.join(quality_warnings)}"
+
+        return (
+            f"指标口径：{metric_def.definition}（单位：{metric_def.unit}）。"
+            f"时间范围：{plan_dsl.time_range.start} 至 {plan_dsl.time_range.end}。"
+            f"主要结论：1) {metric_def.name} {conclusion}。"
+            f"可视化建议：{plan_dsl.output.chart_suggest}。"
+            f"{warnings}"
+        )
+
+    @staticmethod
+    def _extract_metric_value(metric_id: str, data_preview: DataPreview):
+        if metric_id not in data_preview.columns:
+            return None
+        idx = data_preview.columns.index(metric_id)
+        values = [row[idx] for row in data_preview.rows if isinstance(row[idx], (int, float))]
+        if not values:
+            return None
+        return round(sum(values) / len(values), 4)
+
+    def _can_use_llm(self) -> bool:
+        return self.llm_client.__class__.__name__ not in {"MockLLMClient"}
+
+
+==================================================
+FILE PATH: app\core\execute\executor.py
+==================================================
+import time
+from dataclasses import dataclass
+from typing import List
+
+import pymysql
+
+from app.core.config import Settings
+from app.core.execute.quality import run_quality_checks
+from app.core.models import DataPreview, EvidenceBundle, MetricDef, PlanDSL
+
+
+@dataclass
+class ExecutionResult:
+    data_preview: DataPreview
+    quality_warnings: List[str]
+
+
+class QueryExecutor:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    def execute(self, sql: str, plan: PlanDSL, evidence: EvidenceBundle) -> ExecutionResult:
+        issues = self.estimate_cost(plan)
+        if issues:
+            raise ValueError("; ".join(issues))
+
+        metric_def = self._find_metric_def(plan.metric_id, evidence)
+
+        if self.settings.use_mock_db:
+            data_preview = self._mock_preview(plan)
+            warnings = run_quality_checks(metric_def, data_preview)
+            return ExecutionResult(data_preview=data_preview, quality_warnings=warnings)
+
+        start_time = time.time()
+        conn = pymysql.connect(
+            host=self.settings.mysql_host,
+            port=self.settings.mysql_port,
+            user=self.settings.mysql_user,
+            password=self.settings.mysql_password,
+            database=self.settings.mysql_database,
+            charset=self.settings.mysql_charset,
+            connect_timeout=self.settings.mysql_connect_timeout,
+            read_timeout=self.settings.mysql_read_timeout,
+        )
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+                rows = cursor.fetchmany(20)
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        finally:
+            conn.close()
+
+        data_preview = DataPreview(columns=columns, rows=[list(row) for row in rows])
+        warnings = run_quality_checks(metric_def, data_preview)
+        return ExecutionResult(data_preview=data_preview, quality_warnings=warnings)
+
+    @staticmethod
+    def estimate_cost(plan: PlanDSL) -> List[str]:
+        issues: List[str] = []
+        if not plan.time_range:
+            issues.append("Missing time_range, query rejected.")
+        if plan.limit and plan.limit > 10000:
+            issues.append("Limit too large, query rejected.")
+        return issues
+
+    @staticmethod
+    def _find_metric_def(metric_id: str, evidence: EvidenceBundle) -> MetricDef:
+        for metric in evidence.metric_candidates:
+            if metric.metric_id == metric_id:
+                return metric
+        return MetricDef(
+            metric_id=metric_id,
+            name=metric_id,
+            definition="",
+            formula="",
+            required_fields=[],
+            default_time_grain="day",
+            unit="",
+        )
+
+    @staticmethod
+    def _mock_preview(plan: PlanDSL) -> DataPreview:
+        columns: List[str] = []
+        if plan.intent == "trend":
+            columns.append("time_bucket")
+        for dim in plan.dimensions:
+            columns.append(dim.field)
+        columns.append(plan.metric_id)
+
+        if plan.intent == "trend":
+            dim_values = ["sample"] * len(plan.dimensions)
+            rows = [
+                [plan.time_range.start] + dim_values + [0.05],
+                [plan.time_range.end] + dim_values + [0.06],
+            ]
+        elif plan.intent == "rank":
+            dim_values = ["sample"] * len(plan.dimensions)
+            rows = [
+                dim_values + [0.12],
+                dim_values + [0.11],
+            ]
+        else:
+            rows = [["sample"] * len(plan.dimensions) + [0.08]]
+
+        return DataPreview(columns=columns, rows=rows)
+
+
+==================================================
+FILE PATH: app\core\execute\quality.py
+==================================================
+from typing import List
+
+from app.core.models import DataPreview, MetricDef
+
+
+def run_quality_checks(metric_def: MetricDef, data_preview: DataPreview) -> List[str]:
+    warnings: List[str] = []
+    if not data_preview.rows:
+        warnings.append("结果为空，可能是时间范围或过滤条件过窄，或存在数据质量问题。")
+        return warnings
+
+    metric_col = metric_def.metric_id
+    if metric_col in data_preview.columns:
+        idx = data_preview.columns.index(metric_col)
+        values = [row[idx] for row in data_preview.rows if isinstance(row[idx], (int, float))]
+        if values:
+            min_val, max_val = min(values), max(values)
+            if metric_def.unit in {"%", "ratio"} and (min_val < 0 or max_val > 1.5):
+                warnings.append("指标值超出常见范围，建议检查口径或数据质量。")
+            if metric_def.unit in {"count", "min"} and min_val < 0:
+                warnings.append("指标值出现负数，建议检查数据质量。")
+
+    if "unit" in data_preview.columns:
+        idx = data_preview.columns.index("unit")
+        units = {row[idx] for row in data_preview.rows if row[idx] is not None}
+        if len(units) > 1:
+            warnings.append("结果中的单位不一致，请核对量纲。")
+
+    return warnings
+
+
+==================================================
+FILE PATH: app\core\execute\__init__.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\llm\client.py
+==================================================
+import json
+from abc import ABC, abstractmethod
+from typing import Dict
+from urllib import request
+from urllib.error import HTTPError, URLError
+
+from app.core.config import get_settings
+
+
+class LLMClient(ABC):
+    @abstractmethod
+    def generate_json(self, prompt: str, schema: dict) -> Dict:
+        raise NotImplementedError
+
+    def generate_text(self, prompt: str) -> str:
+        raise NotImplementedError
+
+
+class RealLLMClient(LLMClient):
+    def __init__(self, *args, **kwargs) -> None:
+        settings = get_settings()
+        self.base_url = getattr(settings, "llm_base_url", "").rstrip("/")
+        self.api_key = getattr(settings, "llm_api_key", "")
+        self.model = getattr(settings, "llm_model", "")
+        self.timeout = getattr(settings, "llm_timeout", 30)
+        self.max_retries = max(1, int(getattr(settings, "llm_max_retries", 1)))
+        self.force_json = bool(getattr(settings, "llm_force_json", True))
+        self.extract_json = bool(getattr(settings, "llm_extract_json", True))
+        if not self.base_url:
+            raise ValueError("LLM base_url is empty")
+        if not self.api_key:
+            raise ValueError("LLM api_key is empty")
+        if not self.model:
+            raise ValueError("LLM model is empty")
+
+    def generate_json(self, prompt: str, schema: dict) -> Dict:
+        last_error: Exception | None = None
+        for _ in range(self.max_retries):
+            content = self._chat(prompt, require_json=True)
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError as exc:
+                if self.extract_json:
+                    extracted = self._extract_json_object(content)
+                    if extracted is not None:
+                        try:
+                            return json.loads(extracted)
+                        except json.JSONDecodeError as nested_exc:
+                            last_error = nested_exc
+                            continue
+                last_error = exc
+                continue
+        raise ValueError(f"LLM output is not valid JSON: {last_error}") from last_error
+
+    def generate_text(self, prompt: str) -> str:
+        return self._chat(prompt, require_json=False)
+
+    def _chat(self, prompt: str, require_json: bool) -> str:
+        url = f"{self.base_url}/chat/completions"
+        messages = []
+        if require_json and self.force_json:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "You must output a single JSON object and nothing else.",
+                }
+            )
+        messages.append({"role": "user", "content": prompt})
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        req = request.Request(url, data=data, headers=headers)
+        try:
+            with request.urlopen(req, timeout=self.timeout) as resp:
+                body = resp.read().decode("utf-8")
+        except (HTTPError, URLError) as exc:
+            raise ValueError(f"LLM request failed: {exc}") from exc
+        try:
+            resp_json = json.loads(body)
+            return resp_json["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
+            raise ValueError("Invalid LLM response format") from exc
+
+    @staticmethod
+    def _extract_json_object(text: str) -> str | None:
+        if not text:
+            return None
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : idx + 1]
+        return None
+
+
+==================================================
+FILE PATH: app\core\llm\mock_client.py
+==================================================
+import json
+import re
+from typing import Dict, Optional
+
+from app.core.llm.client import LLMClient
+
+
+class MockLLMClient(LLMClient):
+    def __init__(self, force_invalid: bool = False, force_sql: bool = False) -> None:
+        self.force_invalid = force_invalid
+        self.force_sql = force_sql
+
+    def generate_json(self, prompt: str, schema: dict) -> Dict:
+        if self.force_invalid:
+            return "SELECT * FROM t" if self.force_sql else "not json"
+
+        inputs = self._extract_inputs(prompt)
+        question = inputs.get("question", "")
+        evidence = inputs.get("evidence", {})
+        time_range = inputs.get("time_range") or {"start": "2024-01-01", "end": "2024-01-31"}
+
+        metric_candidates = evidence.get("metric_candidates", [])
+        schema_candidates = evidence.get("schema_candidates", [])
+        join_paths = evidence.get("join_paths", [])
+
+        metric_id = self._pick_metric(metric_candidates, question)
+        intent = self._pick_intent(question)
+        join_path_id = join_paths[0]["join_path_id"] if join_paths else "NONE"
+        dimension = self._pick_dimension(schema_candidates)
+
+        time_grain = "day"
+        for metric in metric_candidates:
+            if metric.get("metric_id") == metric_id:
+                time_grain = metric.get("default_time_grain", "day")
+
+        plan = {
+            "version": "1.0",
+            "intent": intent,
+            "metric_id": metric_id,
+            "metric_params": {},
+            "dimensions": [dimension] if dimension and intent in {"trend", "rank"} else [],
+            "time_range": time_range,
+            "time_grain": time_grain,
+            "filters": [],
+            "join_path_id": join_path_id,
+            "sort": self._pick_sort(intent),
+            "limit": 10 if intent == "rank" else 200,
+            "output": self._pick_output(intent),
+            "confidence": 0.6,
+            "clarifications": [],
+        }
+        return plan
+
+    def generate_text(self, prompt: str) -> str:
+        return "这是示例回答，请接入真实 LLM 以获得更完整的自然语言答案。"
+
+    @staticmethod
+    def _extract_inputs(prompt: str) -> Dict:
+        marker = "<INPUTS>"
+        if marker in prompt:
+            payload = prompt.split(marker, 1)[1].strip()
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError:
+                return {}
+        match = re.search(r"(\{.*\})", prompt, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+    @staticmethod
+    def _pick_metric(metric_candidates, question: str) -> str:
+        if not metric_candidates:
+            return "UNKNOWN"
+        if "\u7ebf\u635f" in question:
+            for m in metric_candidates:
+                if "线损" in m.get("name", "") or "loss" in m.get("metric_id", ""):
+                    return m.get("metric_id")
+        if "\u8d1f\u8377" in question:
+            for m in metric_candidates:
+                if "负荷" in m.get("name", "") or "load" in m.get("metric_id", ""):
+                    return m.get("metric_id")
+        if "\u505c\u7535" in question:
+            for m in metric_candidates:
+                if "outage" in m.get("metric_id", ""):
+                    return m.get("metric_id")
+        if "\u8df3\u95f8" in question:
+            for m in metric_candidates:
+                if "trip" in m.get("metric_id", ""):
+                    return m.get("metric_id")
+        return metric_candidates[0].get("metric_id")
+
+    @staticmethod
+    def _pick_intent(question: str) -> str:
+        if "排名" in question or "top" in question.lower():
+            return "rank"
+        if "对比" in question or "\u540c\u6bd4" in question or "\u73af\u6bd4" in question:
+            return "compare"
+        if "明细" in question:
+            return "detail"
+        if "趋势" in question:
+            return "trend"
+        return "aggregate"
+
+    @staticmethod
+    def _pick_dimension(schema_candidates) -> Optional[Dict[str, str]]:
+        for item in schema_candidates:
+            if item.get("field", "").endswith("_name"):
+                return {"table": item.get("table"), "field": item.get("field")}
+        if schema_candidates:
+            item = schema_candidates[0]
+            return {"table": item.get("table"), "field": item.get("field")}
+        return None
+
+    @staticmethod
+    def _pick_sort(intent: str) -> Dict:
+        if intent == "rank":
+            return {"by": "metric", "order": "desc"}
+        if intent == "trend":
+            return {"by": "time_bucket", "order": "asc"}
+        return {"by": "metric", "order": "desc"}
+
+    @staticmethod
+    def _pick_output(intent: str) -> Dict:
+        if intent == "trend":
+            return {"format": "table", "chart_suggest": "line"}
+        if intent == "rank":
+            return {"format": "table", "chart_suggest": "bar"}
+        return {"format": "table", "chart_suggest": "none"}
+
+
+==================================================
+FILE PATH: app\core\llm\__init__.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\planning\planner.py
+==================================================
+import json
+import re
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence
+
+from app.core.config import Settings
+from app.core.llm.client import LLMClient
+from app.core.models import EvidenceBundle, MetricDef, PlanDSL, ValidationError
+from app.core.planning.repair import PlanRepair
+from app.core.planning.validator import PlanValidator
+from app.core.rag.kb_join import JoinGraphKB
+from app.core.rag.kb_metric import MetricKB
+from app.core.rag.kb_schema import SchemaKB
+from app.core.rag.kb_template import TemplateKB
+
+
+SQL_KEYWORDS = re.compile(
+    r"\b(select|from|where|join|group\s+by|order\s+by|insert|update|delete)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class PlanResult:
+    plan: PlanDSL
+    plan_initial: Dict[str, Any]
+    evidence: EvidenceBundle
+    evidence_summary: str
+    validation_errors: List[ValidationError]
+    metric_def: MetricDef
+
+
+class Planner:
+    def __init__(
+        self,
+        settings: Settings,
+        llm_client: LLMClient,
+        schema_kb: SchemaKB,
+        join_kb: JoinGraphKB,
+        metric_kb: MetricKB,
+        template_kb: TemplateKB,
+        validator: PlanValidator,
+        repairer: PlanRepair,
+        prompt_path: str,
+    ) -> None:
+        self.settings = settings
+        self.llm_client = llm_client
+        self.schema_kb = schema_kb
+        self.join_kb = join_kb
+        self.metric_kb = metric_kb
+        self.template_kb = template_kb
+        self.validator = validator
+        self.repairer = repairer
+        self.prompt_template = self._load_prompt(prompt_path)
+
+    @staticmethod
+    def _load_prompt(path: str) -> str:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def generate_plan(
+        self,
+        question: str,
+        user_context: Dict[str, Any],
+        time_range: Optional[Dict[str, str]] = None,
+    ) -> PlanResult:
+        slots = self._parse_slots(question)
+        evidence = self._retrieve(question, slots, self.settings.rag_top_k)
+        if self.settings.llm_mode == "no_llm":
+            evidence = self._ensure_no_llm_evidence(evidence)
+            plan = self._build_fixed_plan(evidence, time_range)
+            plan_initial = plan
+            validation_errors: List[ValidationError] = []
+        else:
+            plan = self._call_llm(question, user_context, time_range, evidence)
+            plan_initial = plan
+            validation_errors = self.validator.validate(plan, evidence)
+            if self._has_error(validation_errors, "metric_not_found"):
+                evidence = EvidenceBundle(
+                    metric_candidates=self.metric_kb.data,
+                    schema_candidates=evidence.schema_candidates,
+                    join_paths=evidence.join_paths,
+                    template_rules=evidence.template_rules,
+                )
+                fixed_metric_id = self._auto_fix_metric_id(question, self.metric_kb.data)
+                if fixed_metric_id:
+                    plan["metric_id"] = fixed_metric_id
+                validation_errors = self.validator.validate(plan, evidence)
+
+        if validation_errors:
+            evidence = self._augment_evidence_for_errors(evidence, validation_errors)
+            suggestions = self._collect_suggestions(validation_errors)
+            refine_query = " ".join([question] + suggestions)
+            refine_slots = self._parse_slots(refine_query)
+            evidence = self._retrieve(
+                refine_query, refine_slots, self.settings.rag_top_k_second
+            )
+            plan = self.repairer.repair(plan, [e.dict() for e in validation_errors], evidence)
+            validation_errors = self.validator.validate(plan, evidence)
+            if self._has_error(validation_errors, "metric_not_found"):
+                evidence = EvidenceBundle(
+                    metric_candidates=self.metric_kb.data,
+                    schema_candidates=evidence.schema_candidates,
+                    join_paths=evidence.join_paths,
+                    template_rules=evidence.template_rules,
+                )
+                fixed_metric_id = self._auto_fix_metric_id(question, self.metric_kb.data)
+                if fixed_metric_id:
+                    plan["metric_id"] = fixed_metric_id
+                validation_errors = self.validator.validate(plan, evidence)
+
+        if validation_errors:
+            raise ValueError(
+                "Plan validation failed: "
+                + "; ".join([e.message for e in validation_errors])
+            )
+
+        if self._contains_sql_keywords(json.dumps(plan, ensure_ascii=False)):
+            raise ValueError("LLM output contains SQL keywords")
+
+        plan_obj = PlanDSL.parse_obj(plan)
+        metric_def = self._get_metric_def(plan_obj.metric_id, evidence)
+        evidence_summary = self._summarize_evidence(evidence)
+        return PlanResult(
+            plan=plan_obj,
+            plan_initial=plan_initial,
+            evidence=evidence,
+            evidence_summary=evidence_summary,
+            validation_errors=validation_errors,
+            metric_def=metric_def,
+        )
+
+    def _call_llm(
+        self,
+        question: str,
+        user_context: Dict[str, Any],
+        time_range: Optional[Dict[str, str]],
+        evidence: EvidenceBundle,
+    ) -> Dict[str, Any]:
+        payload = {
+            "question": question,
+            "user_context": user_context,
+            "time_range": time_range,
+            "evidence": evidence.dict(),
+        }
+        prompt = f"{self.prompt_template}\n\n<INPUTS>\n{json.dumps(payload, ensure_ascii=False)}"
+        try:
+            plan = self.llm_client.generate_json(prompt=prompt, schema=self.validator.schema)
+        except Exception as exc:
+            if self.settings.llm_plan_retry_on_timeout and self._is_timeout_error(exc):
+                trimmed = self._trim_evidence(evidence, self.settings.llm_plan_trim_top_k)
+                small_payload = {
+                    "question": question,
+                    "user_context": user_context,
+                    "time_range": time_range,
+                    "evidence": trimmed,
+                }
+                small_prompt = (
+                    f"{self.prompt_template}\n\n<INPUTS_TRIMMED>\n"
+                    f"{json.dumps(small_payload, ensure_ascii=False)}"
+                )
+                try:
+                    plan = self.llm_client.generate_json(
+                        prompt=small_prompt, schema=self.validator.schema
+                    )
+                except Exception as exc2:
+                    raise ValueError(
+                        f"LLM plan generation failed (timeout, trimmed retry failed): {exc2}"
+                    ) from exc2
+            else:
+                raise ValueError(f"LLM plan generation failed: {exc}") from exc
+        if not isinstance(plan, dict):
+            if isinstance(plan, str) and self._contains_sql_keywords(plan):
+                raise ValueError("LLM output contains SQL keywords")
+            raise ValueError("LLM output is not JSON")
+        return plan
+
+    def _retrieve(self, text: str, slots: Dict[str, List[str]], top_k: int) -> EvidenceBundle:
+        metric_query = self._build_query(text, slots.get("metric_terms", []))
+        schema_query = self._build_query(text, slots.get("schema_terms", []))
+        join_query = self._build_query(
+            text, slots.get("object_terms", []) + slots.get("schema_terms", [])
+        )
+        template_query = self._build_query(text, slots.get("intent_terms", []))
+
+        metric_candidates = self.metric_kb.query(metric_query, top_k=top_k)
+        schema_candidates = self.schema_kb.query(schema_query, top_k=top_k)
+        schema_candidates = self._ensure_time_fields(schema_candidates)
+        join_paths = self.join_kb.query(join_query, top_k=top_k)
+        template_rules = self.template_kb.query(template_query, top_k=top_k)
+        return EvidenceBundle(
+            metric_candidates=metric_candidates,
+            schema_candidates=schema_candidates,
+            join_paths=join_paths,
+            template_rules=template_rules,
+        )
+
+    @staticmethod
+    def _is_timeout_error(exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return "timeout" in msg or "timed out" in msg
+
+    @staticmethod
+    def _trim_evidence(evidence: EvidenceBundle, top_k: int) -> Dict[str, Any]:
+        top_k = max(1, int(top_k))
+        metrics = []
+        for item in evidence.metric_candidates[:top_k]:
+            metrics.append(
+                {
+                    "metric_id": item.metric_id,
+                    "name": item.name,
+                    "definition": item.definition,
+                    "default_time_grain": item.default_time_grain,
+                    "unit": item.unit,
+                    "required_fields": item.required_fields,
+                }
+            )
+        schemas = []
+        for item in evidence.schema_candidates[:top_k]:
+            schemas.append(
+                {
+                    "table": item.table,
+                    "field": item.field,
+                    "field_desc": item.field_desc,
+                    "aliases": item.aliases,
+                    "unit": item.unit,
+                    "data_type": item.data_type,
+                    "quality_tags": item.quality_tags,
+                }
+            )
+        joins = []
+        for item in evidence.join_paths[:top_k]:
+            joins.append(
+                {
+                    "join_path_id": item.join_path_id,
+                    "description": item.description,
+                    "tables": item.tables,
+                    "edges": [edge.dict() for edge in item.edges],
+                }
+            )
+        templates = []
+        for item in evidence.template_rules[:top_k]:
+            templates.append(
+                {
+                    "template_id": item.template_id,
+                    "intent": item.intent,
+                    "allowed_aggs": item.allowed_aggs,
+                    "allowed_funcs": item.allowed_funcs,
+                    "required_clauses": item.required_clauses,
+                }
+            )
+        return {
+            "metric_candidates": metrics,
+            "schema_candidates": schemas,
+            "join_paths": joins,
+            "template_rules": templates,
+        }
+
+    @staticmethod
+    def _collect_suggestions(errors: List[ValidationError]) -> List[str]:
+        suggestions: List[str] = []
+        for err in errors:
+            suggestions.extend(err.suggestions)
+        return suggestions[:8]
+
+    @staticmethod
+    def _summarize_evidence(evidence: EvidenceBundle) -> str:
+        metrics = ",".join([m.metric_id for m in evidence.metric_candidates])
+        fields = ",".join([f"{s.table}.{s.field}" for s in evidence.schema_candidates])
+        joins = ",".join([j.join_path_id for j in evidence.join_paths])
+        templates = ",".join([t.template_id for t in evidence.template_rules])
+        return f"metrics=[{metrics}] schema=[{fields}] joins=[{joins}] templates=[{templates}]"
+
+    @staticmethod
+    def _contains_sql_keywords(text: str) -> bool:
+        return bool(SQL_KEYWORDS.search(text))
+
+    @staticmethod
+    def _get_metric_def(metric_id: str, evidence: EvidenceBundle) -> MetricDef:
+        for metric in evidence.metric_candidates:
+            if metric.metric_id == metric_id:
+                return metric
+        raise ValueError("metric_id not found in evidence")
+
+    def _build_fixed_plan(
+        self, evidence: EvidenceBundle, time_range: Optional[Dict[str, str]]
+    ) -> Dict[str, Any]:
+        if not time_range or not time_range.get("start") or not time_range.get("end"):
+            raise ValueError("no_llm mode requires time_range")
+        if not evidence.metric_candidates:
+            raise ValueError("no_llm mode requires metric candidates")
+        metric = self._pick_fixed_metric(evidence)
+        tables = set()
+        for field in metric.required_fields:
+            if "." in field:
+                table, _ = field.split(".", 1)
+                tables.add(table)
+        time_table = self._pick_time_table(evidence)
+        if time_table:
+            tables.add(time_table)
+
+        join_path_id = "NONE"
+        if len(tables) > 1:
+            for jp in evidence.join_paths:
+                if tables.issubset(set(jp.tables)):
+                    join_path_id = jp.join_path_id
+                    break
+            if join_path_id == "NONE":
+                raise ValueError("no_llm mode cannot find join_path for required tables")
+
+        return {
+            "version": "1.0",
+            "intent": "aggregate",
+            "metric_id": metric.metric_id,
+            "metric_params": {},
+            "dimensions": [],
+            "time_range": {"start": time_range["start"], "end": time_range["end"]},
+            "time_grain": metric.default_time_grain or "day",
+            "filters": [],
+            "join_path_id": join_path_id,
+            "sort": None,
+            "limit": 200,
+            "output": {"format": "single_value", "chart_suggest": "none"},
+            "confidence": 0.1,
+            "clarifications": ["no_llm mode: fixed plan for SQL/DB test"],
+            "errors_unresolved": [],
+        }
+
+    def _pick_fixed_metric(self, evidence: EvidenceBundle) -> MetricDef:
+        fixed = (self.settings.fixed_metric_id or "").strip()
+        if fixed:
+            for item in evidence.metric_candidates:
+                if item.metric_id == fixed:
+                    return item
+            for item in self.metric_kb.data:
+                if item.metric_id == fixed:
+                    return item
+            raise ValueError(f"no_llm mode fixed_metric_id not found: {fixed}")
+        return evidence.metric_candidates[0]
+
+    def _ensure_no_llm_evidence(self, evidence: EvidenceBundle) -> EvidenceBundle:
+        metric_candidates = evidence.metric_candidates or self.metric_kb.data
+        schema_candidates = evidence.schema_candidates or self.schema_kb.data
+        join_paths = evidence.join_paths or self.join_kb.data
+        template_rules = evidence.template_rules or self.template_kb.data
+        return EvidenceBundle(
+            metric_candidates=metric_candidates,
+            schema_candidates=schema_candidates,
+            join_paths=join_paths,
+            template_rules=template_rules,
+        )
+
+    @staticmethod
+    def _pick_time_table(evidence: EvidenceBundle) -> str:
+        for item in evidence.schema_candidates:
+            if item.field.lower() in {"ts", "timestamp", "event_time", "date", "dt"}:
+                return item.table
+            if item.data_type.lower() in {"datetime", "timestamp", "date"}:
+                return item.table
+        return ""
+
+    def _augment_evidence_for_errors(
+        self, evidence: EvidenceBundle, errors: List[ValidationError]
+    ) -> EvidenceBundle:
+        error_codes = {e.code for e in errors}
+        metric_candidates = evidence.metric_candidates
+        schema_candidates = evidence.schema_candidates
+        if "metric_not_found" in error_codes and not metric_candidates:
+            metric_candidates = self.metric_kb.data
+        if "time_field_missing" in error_codes:
+            schema_candidates = self._ensure_time_fields(schema_candidates, force_all=True)
+        return EvidenceBundle(
+            metric_candidates=metric_candidates,
+            schema_candidates=schema_candidates,
+            join_paths=evidence.join_paths,
+            template_rules=evidence.template_rules,
+        )
+
+    def _ensure_time_fields(
+        self, schema_candidates: List, force_all: bool = False
+    ) -> List:
+        if not force_all and any(
+            item.field.lower() in {"ts", "timestamp", "event_time", "date", "dt"}
+            or item.data_type.lower() in {"datetime", "timestamp", "date"}
+            for item in schema_candidates
+        ):
+            return schema_candidates
+        time_fields = [
+            item
+            for item in self.schema_kb.data
+            if item.field.lower() in {"ts", "timestamp", "event_time", "date", "dt"}
+            or item.data_type.lower() in {"datetime", "timestamp", "date"}
+        ]
+        merged = {f"{i.table}.{i.field}": i for i in schema_candidates}
+        for item in time_fields:
+            merged.setdefault(f"{item.table}.{item.field}", item)
+        return list(merged.values())
+
+    def _parse_slots(self, question: str) -> Dict[str, List[str]]:
+        norm = question.lower()
+        metric_terms: List[str] = []
+        schema_terms: List[str] = []
+        object_terms: List[str] = []
+        intent_terms: List[str] = []
+
+        for metric in self.metric_kb.data:
+            for term in [metric.metric_id, metric.name]:
+                if term and term.lower() in norm:
+                    metric_terms.append(term)
+
+        for item in self.schema_kb.data:
+            candidates: Sequence[str] = (
+                [item.table, item.field, item.field_desc] + item.aliases
+            )
+            if any(term and term.lower() in norm for term in candidates):
+                schema_terms.append(f"{item.table}.{item.field}")
+                object_terms.append(item.table)
+
+        intent = self._detect_intent(norm)
+        if intent:
+            intent_terms.append(intent)
+
+        return {
+            "metric_terms": self._dedupe(metric_terms),
+            "schema_terms": self._dedupe(schema_terms),
+            "object_terms": self._dedupe(object_terms),
+            "intent_terms": intent_terms,
+        }
+
+    @staticmethod
+    def _detect_intent(text: str) -> str:
+        if any(k in text for k in ["\u6392\u540d", "top", "rank"]):
+            return "rank"
+        if any(k in text for k in ["\u8d8b\u52bf", "trend"]):
+            return "trend"
+        if any(k in text for k in ["\u5bf9\u6bd4", "\u540c\u6bd4", "\u73af\u6bd4", "compare"]):
+            return "compare"
+        if any(k in text for k in ["\u660e\u7ec6", "detail"]):
+            return "detail"
+        return ""
+
+    @staticmethod
+    def _build_query(text: str, terms: List[str]) -> str:
+        if terms:
+            return " ".join(terms + [text])
+        return text
+
+    @staticmethod
+    def _auto_fix_metric_id(question: str, metrics: List[MetricDef]) -> str:
+        q = question.lower()
+        best_score = -1
+        best_id = ""
+        for metric in metrics:
+            score = 0
+            text = " ".join(
+                [
+                    metric.metric_id,
+                    metric.name,
+                    metric.definition,
+                    metric.formula,
+                    " ".join(metric.required_fields),
+                ]
+            ).lower()
+            for token in Planner._simple_tokens(q):
+                if token and token in text:
+                    score += 2
+            if any(k in q for k in ["金额", "费用", "cost", "amount"]) and (
+                "amount" in text or "total_amount" in text
+            ):
+                score += 5
+            if any(k in q for k in ["用电量", "用电", "电量", "consumption", "kwh"]) and (
+                "consumption" in text
+            ):
+                score += 5
+            if "账单" in q and "bills." in text:
+                score += 3
+            if score > best_score:
+                best_score = score
+                best_id = metric.metric_id
+        return best_id
+
+    @staticmethod
+    def _simple_tokens(text: str) -> List[str]:
+        return re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]", text)
+
+    @staticmethod
+    def _has_error(errors: List[ValidationError], code: str) -> bool:
+        return any(err.code == code for err in errors)
+
+    @staticmethod
+    def _dedupe(items: List[str]) -> List[str]:
+        seen = set()
+        output: List[str] = []
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                output.append(item)
+        return output
+
+
+==================================================
+FILE PATH: app\core\planning\repair.py
+==================================================
+import json
+from typing import Dict, List
+
+from app.core.llm.client import LLMClient
+
+
+class PlanRepair:
+    def __init__(self, llm_client: LLMClient, schema: dict, prompt_path: str) -> None:
+        self.llm_client = llm_client
+        self.schema = schema
+        self.prompt_template = self._load_prompt(prompt_path)
+
+    @staticmethod
+    def _load_prompt(path: str) -> str:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def repair(self, original_plan: Dict, validation_errors: List[Dict], evidence) -> Dict:
+        payload = {
+            "original_plan": original_plan,
+            "validation_errors": validation_errors,
+            "evidence": evidence.dict(),
+            "schema": self.schema,
+        }
+        prompt = f"{self.prompt_template}\n\n<INPUTS>\n{json.dumps(payload, ensure_ascii=False)}"
+        plan = self.llm_client.generate_json(prompt=prompt, schema=self.schema)
+        if not isinstance(plan, dict):
+            raise ValueError("LLM repair output is not JSON")
+        return plan
+
+
+==================================================
+FILE PATH: app\core\planning\validator.py
+==================================================
+from datetime import date
+from typing import Dict, List
+
+from app.core.models import EvidenceBundle, ValidationError
+from app.core.schema import validate_plan
+
+
+TIME_FIELD_NAMES = {"ts", "timestamp", "event_time", "date", "dt"}
+TIME_DATA_TYPES = {"datetime", "timestamp", "date"}
+
+
+class PlanValidator:
+    def __init__(self, schema: dict) -> None:
+        self.schema = schema
+
+    def validate(self, plan: Dict, evidence: EvidenceBundle) -> List[ValidationError]:
+        if not isinstance(plan, dict):
+            return [
+                ValidationError(
+                    code="not_json",
+                    message="Plan is not a JSON object",
+                    field_path="$",
+                    suggestions=[],
+                )
+            ]
+
+        errors = validate_plan(plan, self.schema)
+        if errors:
+            return errors
+
+        metric_ids = {m.metric_id for m in evidence.metric_candidates}
+        if plan.get("metric_id") not in metric_ids:
+            errors.append(
+                ValidationError(
+                    code="metric_not_found",
+                    message="metric_id not in candidates",
+                    field_path="metric_id",
+                    suggestions=sorted(metric_ids),
+                )
+            )
+
+        schema_fields = {f"{s.table}.{s.field}" for s in evidence.schema_candidates}
+        for idx, dim in enumerate(plan.get("dimensions", [])):
+            key = f"{dim.get('table')}.{dim.get('field')}"
+            if key not in schema_fields:
+                errors.append(
+                    ValidationError(
+                        code="dimension_field_invalid",
+                        message=f"Dimension field {key} not in schema candidates",
+                        field_path=f"dimensions[{idx}]",
+                        suggestions=sorted(schema_fields)[:5],
+                    )
+                )
+
+        for idx, fil in enumerate(plan.get("filters", [])):
+            key = f"{fil.get('table')}.{fil.get('field')}"
+            if key not in schema_fields:
+                errors.append(
+                    ValidationError(
+                        code="filter_field_invalid",
+                        message=f"Filter field {key} not in schema candidates",
+                        field_path=f"filters[{idx}]",
+                        suggestions=sorted(schema_fields)[:5],
+                    )
+                )
+
+        join_ids = {j.join_path_id for j in evidence.join_paths}
+        join_path_id = plan.get("join_path_id")
+        if join_path_id != "NONE" and join_path_id not in join_ids:
+            referenced_tables = self._collect_tables(plan, evidence)
+            suggestions = self._suggest_join_paths(referenced_tables, evidence) or sorted(join_ids)
+            errors.append(
+                ValidationError(
+                    code="join_path_not_found",
+                    message="join_path_id not in candidates",
+                    field_path="join_path_id",
+                    suggestions=suggestions,
+                )
+            )
+        else:
+            join_errors = self._check_join_reachability(plan, evidence)
+            errors.extend(join_errors)
+
+        time_range = plan.get("time_range") or {}
+        start = time_range.get("start")
+        end = time_range.get("end")
+        if start and end:
+            try:
+                start_date = date.fromisoformat(start)
+                end_date = date.fromisoformat(end)
+                if start_date > end_date:
+                    errors.append(
+                        ValidationError(
+                            code="time_range_invalid",
+                            message="time_range.start is after end",
+                            field_path="time_range",
+                            suggestions=[],
+                        )
+                    )
+            except ValueError:
+                errors.append(
+                    ValidationError(
+                        code="time_range_invalid",
+                        message="time_range must be YYYY-MM-DD",
+                        field_path="time_range",
+                        suggestions=["YYYY-MM-DD"],
+                    )
+                )
+        else:
+            errors.append(
+                ValidationError(
+                    code="time_range_missing",
+                    message="time_range is required",
+                    field_path="time_range",
+                    suggestions=[],
+                )
+            )
+
+        if plan.get("intent") == "trend" and not plan.get("time_grain"):
+            errors.append(
+                ValidationError(
+                    code="time_grain_required",
+                    message="time_grain required for trend intent",
+                    field_path="time_grain",
+                    suggestions=[
+                        "15m",
+                        "hour",
+                        "day",
+                        "week",
+                        "month",
+                    ],
+                )
+            )
+
+        if not self._has_time_field(evidence):
+            errors.append(
+                ValidationError(
+                    code="time_field_missing",
+                    message="No time field found in schema candidates",
+                    field_path="time_range",
+                    suggestions=[],
+                )
+            )
+
+        template_errors = self._check_template_rules(plan, evidence)
+        errors.extend(template_errors)
+
+        return errors
+
+    @staticmethod
+    def _has_time_field(evidence: EvidenceBundle) -> bool:
+        for item in evidence.schema_candidates:
+            if item.field.lower() in TIME_FIELD_NAMES:
+                return True
+            if item.data_type.lower() in TIME_DATA_TYPES:
+                return True
+        for metric in evidence.metric_candidates:
+            for field in metric.required_fields:
+                if "." in field:
+                    _, fld = field.split(".", 1)
+                else:
+                    fld = field
+                if fld.lower() in TIME_FIELD_NAMES:
+                    return True
+        return False
+
+    @staticmethod
+    def _check_template_rules(plan: Dict, evidence: EvidenceBundle) -> List[ValidationError]:
+        errors: List[ValidationError] = []
+        intent = plan.get("intent")
+        for rule in evidence.template_rules:
+            if rule.intent != intent:
+                continue
+            required_funcs = PlanValidator._required_funcs(plan)
+            if required_funcs and not set(required_funcs).issubset(set(rule.allowed_funcs)):
+                errors.append(
+                    ValidationError(
+                        code="function_not_allowed",
+                        message="Required functions not in allowlist",
+                        field_path="time_grain",
+                        suggestions=rule.allowed_funcs,
+                    )
+                )
+            required_aggs = PlanValidator._required_aggs(plan, evidence)
+            if required_aggs and not set(required_aggs).issubset(set(rule.allowed_aggs)):
+                errors.append(
+                    ValidationError(
+                        code="agg_not_allowed",
+                        message="Required aggregations not in allowlist",
+                        field_path="metric_id",
+                        suggestions=rule.allowed_aggs,
+                    )
+                )
+            for clause in rule.required_clauses:
+                if clause == "time_range" and not plan.get("time_range"):
+                    errors.append(
+                        ValidationError(
+                            code="required_clause_missing",
+                            message="time_range required by template",
+                            field_path="time_range",
+                            suggestions=[],
+                        )
+                    )
+                if clause == "time_grain" and not plan.get("time_grain"):
+                    errors.append(
+                        ValidationError(
+                            code="required_clause_missing",
+                            message="time_grain required by template",
+                            field_path="time_grain",
+                            suggestions=[rule.intent],
+                        )
+                    )
+                if clause == "group_by_time" and not plan.get("time_grain"):
+                    errors.append(
+                        ValidationError(
+                            code="required_clause_missing",
+                            message="group_by_time required by template",
+                            field_path="time_grain",
+                            suggestions=["day"],
+                        )
+                    )
+                if clause == "order_by" and not plan.get("sort"):
+                    errors.append(
+                        ValidationError(
+                            code="required_clause_missing",
+                            message="sort required by template",
+                            field_path="sort",
+                            suggestions=["metric desc"],
+                        )
+                    )
+                if clause == "limit" and not plan.get("limit"):
+                    errors.append(
+                        ValidationError(
+                            code="required_clause_missing",
+                            message="limit required by template",
+                            field_path="limit",
+                            suggestions=["10"],
+                        )
+                    )
+        return errors
+
+    @staticmethod
+    def _required_funcs(plan: Dict) -> List[str]:
+        if plan.get("intent") != "trend":
+            return []
+        grain = plan.get("time_grain")
+        if grain == "15m":
+            return ["from_unixtime", "unix_timestamp"]
+        if grain in {"hour", "day", "month"}:
+            return ["date_format"]
+        if grain == "week":
+            return ["yearweek"]
+        return []
+
+    @staticmethod
+    def _required_aggs(plan: Dict, evidence: EvidenceBundle) -> List[str]:
+        metric_id = plan.get("metric_id")
+        if not metric_id:
+            return []
+        for metric in evidence.metric_candidates:
+            if metric.metric_id == metric_id:
+                return ["sum"]
+        return []
+
+    def _check_join_reachability(
+        self, plan: Dict, evidence: EvidenceBundle
+    ) -> List[ValidationError]:
+        errors: List[ValidationError] = []
+        referenced_tables = self._collect_tables(plan, evidence)
+        if not referenced_tables:
+            return errors
+
+        join_path_id = plan.get("join_path_id")
+        if join_path_id == "NONE":
+            if len(referenced_tables) > 1:
+                suggestions = self._suggest_join_paths(referenced_tables, evidence)
+                errors.append(
+                    ValidationError(
+                        code="join_required",
+                        message="Multiple tables referenced but join_path_id is NONE",
+                        field_path="join_path_id",
+                        suggestions=suggestions,
+                    )
+                )
+            return errors
+
+        join_path = next(
+            (jp for jp in evidence.join_paths if jp.join_path_id == join_path_id), None
+        )
+        if join_path and not referenced_tables.issubset(set(join_path.tables)):
+            suggestions = self._suggest_join_paths(referenced_tables, evidence)
+            errors.append(
+                ValidationError(
+                    code="join_path_unreachable",
+                    message="join_path_id does not cover all referenced tables",
+                    field_path="join_path_id",
+                    suggestions=suggestions,
+                )
+            )
+        return errors
+
+    def _collect_tables(self, plan: Dict, evidence: EvidenceBundle) -> set:
+        tables = set()
+        for dim in plan.get("dimensions", []):
+            table = dim.get("table")
+            if table:
+                tables.add(table)
+        for fil in plan.get("filters", []):
+            table = fil.get("table")
+            if table:
+                tables.add(table)
+
+        metric_id = plan.get("metric_id")
+        metric_tables = set()
+        for metric in evidence.metric_candidates:
+            if metric.metric_id == metric_id:
+                for field in metric.required_fields:
+                    if "." in field:
+                        table, _ = field.split(".", 1)
+                        tables.add(table)
+                        metric_tables.add(table)
+                break
+
+        time_table = self._pick_time_table(evidence, metric_tables)
+        if time_table:
+            tables.add(time_table)
+        return tables
+
+    @staticmethod
+    def _pick_time_table(evidence: EvidenceBundle, preferred_tables: set) -> str:
+        if preferred_tables:
+            for item in evidence.schema_candidates:
+                if item.table in preferred_tables:
+                    if item.field.lower() in TIME_FIELD_NAMES:
+                        return item.table
+                    if item.data_type.lower() in TIME_DATA_TYPES:
+                        return item.table
+        for item in evidence.schema_candidates:
+            if item.field.lower() in TIME_FIELD_NAMES:
+                return item.table
+            if item.data_type.lower() in TIME_DATA_TYPES:
+                return item.table
+        return ""
+
+    @staticmethod
+    def _suggest_join_paths(referenced_tables: set, evidence: EvidenceBundle) -> List[str]:
+        suggestions: List[str] = []
+        for jp in evidence.join_paths:
+            if referenced_tables.issubset(set(jp.tables)):
+                suggestions.append(jp.join_path_id)
+        return suggestions
+
+
+==================================================
+FILE PATH: app\core\planning\__init__.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\rag\faiss_store.py
+==================================================
+import re
+from typing import Any, Dict, List, Optional
+
+from app.core.rag.vector_store import Document, VectorStore
+
+
+def _tokenize(text: str) -> List[str]:
+    return re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]", text.lower())
+
+
+class SimpleInMemoryVectorStore(VectorStore):
+    def __init__(self) -> None:
+        self._docs: Dict[str, Dict[str, Any]] = {}
+        self._tokens: Dict[str, set] = {}
+
+    def upsert(self, doc_id: str, text: str, metadata: Dict[str, Any]) -> None:
+        tokens = set(_tokenize(text))
+        self._docs[doc_id] = {"text": text, "metadata": metadata}
+        self._tokens[doc_id] = tokens
+
+    def query(
+        self, text: str, top_k: int = 5, filter: Optional[Dict[str, Any]] = None
+    ) -> List[Document]:
+        q_tokens = set(_tokenize(text))
+        if not q_tokens:
+            return []
+        scored: List[Document] = []
+        for doc_id, tokens in self._tokens.items():
+            metadata = self._docs[doc_id]["metadata"]
+            if filter:
+                if any(metadata.get(k) != v for k, v in filter.items()):
+                    continue
+            score = self._cosine_sim(q_tokens, tokens)
+            if score > 0:
+                scored.append(
+                    Document(
+                        doc_id=doc_id,
+                        text=self._docs[doc_id]["text"],
+                        metadata=metadata,
+                        score=score,
+                    )
+                )
+        scored.sort(key=lambda d: d.score, reverse=True)
+        return scored[:top_k]
+
+    @staticmethod
+    def _cosine_sim(a: set, b: set) -> float:
+        if not a or not b:
+            return 0.0
+        inter = len(a & b)
+        return inter / ((len(a) ** 0.5) * (len(b) ** 0.5))
+
+
+==================================================
+FILE PATH: app\core\rag\kb_join.py
+==================================================
+import json
+from pathlib import Path
+from typing import List
+
+from app.core.models import JoinPath
+from app.core.rag.vector_store import VectorStore
+
+
+class JoinGraphKB:
+    def __init__(self, path: str, store: VectorStore) -> None:
+        self.path = Path(path)
+        self.store = store
+        self.data: List[JoinPath] = []
+        self.graph: dict = {}
+        self._load()
+
+    def _load(self) -> None:
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        self.data = [JoinPath(**item) for item in raw]
+        self.graph = {}
+        for item in self.data:
+            text = " ".join(
+                [
+                    item.join_path_id,
+                    item.description,
+                    " ".join(item.tables),
+                ]
+            )
+            doc_id = f"join::{item.join_path_id}"
+            self.store.upsert(doc_id, text, item.dict())
+            for edge in item.edges:
+                self._add_edge(edge.left_table, edge.right_table)
+                self._add_edge(edge.right_table, edge.left_table)
+
+    def _add_edge(self, left: str, right: str) -> None:
+        if left not in self.graph:
+            self.graph[left] = set()
+        self.graph[left].add(right)
+
+    def query(self, text: str, top_k: int = 5) -> List[JoinPath]:
+        docs = self.store.query(text, top_k=top_k)
+        return [JoinPath(**doc.metadata) for doc in docs]
+
+
+==================================================
+FILE PATH: app\core\rag\kb_metric.py
+==================================================
+import json
+from pathlib import Path
+from typing import List
+
+from app.core.models import MetricDef
+from app.core.rag.vector_store import VectorStore
+
+
+class MetricKB:
+    def __init__(self, path: str, store: VectorStore) -> None:
+        self.path = Path(path)
+        self.store = store
+        self.data: List[MetricDef] = []
+        self._load()
+
+    def _load(self) -> None:
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        self.data = [MetricDef(**item) for item in raw]
+        for item in self.data:
+            text = " ".join(
+                [
+                    item.metric_id,
+                    item.name,
+                    item.definition,
+                    item.formula,
+                    " ".join(item.required_fields),
+                    item.default_time_grain,
+                    item.unit,
+                ]
+            )
+            doc_id = f"metric::{item.metric_id}"
+            self.store.upsert(doc_id, text, item.dict())
+
+    def query(self, text: str, top_k: int = 5) -> List[MetricDef]:
+        docs = self.store.query(text, top_k=top_k)
+        return [MetricDef(**doc.metadata) for doc in docs]
+
+
+==================================================
+FILE PATH: app\core\rag\kb_schema.py
+==================================================
+import json
+from pathlib import Path
+from typing import List
+
+from app.core.models import SchemaEntity
+from app.core.rag.vector_store import VectorStore
+
+
+class SchemaKB:
+    def __init__(self, path: str, store: VectorStore) -> None:
+        self.path = Path(path)
+        self.store = store
+        self.data: List[SchemaEntity] = []
+        self._load()
+
+    def _load(self) -> None:
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        self.data = [SchemaEntity(**item) for item in raw]
+        for item in self.data:
+            text = " ".join(
+                [
+                    item.table,
+                    item.field,
+                    item.field_desc,
+                    " ".join(item.aliases),
+                    item.unit,
+                    item.data_type,
+                    " ".join(item.quality_tags),
+                ]
+            )
+            doc_id = f"schema::{item.table}.{item.field}"
+            self.store.upsert(doc_id, text, item.dict())
+
+    def query(self, text: str, top_k: int = 5) -> List[SchemaEntity]:
+        docs = self.store.query(text, top_k=top_k)
+        return [SchemaEntity(**doc.metadata) for doc in docs]
+
+
+==================================================
+FILE PATH: app\core\rag\kb_template.py
+==================================================
+import json
+from pathlib import Path
+from typing import List
+
+from app.core.models import TemplateRule
+from app.core.rag.vector_store import VectorStore
+
+
+class TemplateKB:
+    def __init__(self, path: str, store: VectorStore) -> None:
+        self.path = Path(path)
+        self.store = store
+        self.data: List[TemplateRule] = []
+        self._load()
+
+    def _load(self) -> None:
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        self.data = [TemplateRule(**item) for item in raw]
+        for item in self.data:
+            text = " ".join(
+                [
+                    item.template_id,
+                    item.intent,
+                    " ".join(item.allowed_aggs),
+                    " ".join(item.allowed_funcs),
+                    " ".join(item.required_clauses),
+                ]
+            )
+            doc_id = f"template::{item.template_id}"
+            self.store.upsert(doc_id, text, item.dict())
+
+    def query(self, text: str, top_k: int = 5) -> List[TemplateRule]:
+        docs = self.store.query(text, top_k=top_k)
+        return [TemplateRule(**doc.metadata) for doc in docs]
+
+
+==================================================
+FILE PATH: app\core\rag\pgvector_store.py
+==================================================
+
+
+
+==================================================
+FILE PATH: app\core\rag\vector_store.py
+==================================================
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class Document:
+    doc_id: str
+    text: str
+    metadata: Dict[str, Any]
+    score: float
+
+
+class VectorStore(ABC):
+    @abstractmethod
+    def upsert(self, doc_id: str, text: str, metadata: Dict[str, Any]) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def query(
+        self, text: str, top_k: int = 5, filter: Optional[Dict[str, Any]] = None
+    ) -> List[Document]:
+        raise NotImplementedError
+
+
+==================================================
+FILE PATH: app\core\rag\__init__.py
+==================================================
+
+
+
+==================================================
+FILE PATH: data\join_kb.json
+==================================================
+[
+  {
+    "join_path_id": "bills_meters",
+    "description": "bills to meters",
+    "tables": [
+      "bills",
+      "meters"
+    ],
+    "edges": [
+      {
+        "left_table": "bills",
+        "left_field": "meter_id",
+        "right_table": "meters",
+        "right_field": "meter_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "bills_users",
+    "description": "bills to users",
+    "tables": [
+      "bills",
+      "users"
+    ],
+    "edges": [
+      {
+        "left_table": "bills",
+        "left_field": "user_id",
+        "right_table": "users",
+        "right_field": "user_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "electricity_records_meters",
+    "description": "electricity_records to meters",
+    "tables": [
+      "electricity_records",
+      "meters"
+    ],
+    "edges": [
+      {
+        "left_table": "electricity_records",
+        "left_field": "meter_id",
+        "right_table": "meters",
+        "right_field": "meter_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "meters_users",
+    "description": "meters to users",
+    "tables": [
+      "meters",
+      "users"
+    ],
+    "edges": [
+      {
+        "left_table": "meters",
+        "left_field": "user_id",
+        "right_table": "users",
+        "right_field": "user_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "payment_records_bills",
+    "description": "payment_records to bills",
+    "tables": [
+      "payment_records",
+      "bills"
+    ],
+    "edges": [
+      {
+        "left_table": "payment_records",
+        "left_field": "bill_id",
+        "right_table": "bills",
+        "right_field": "bill_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "payment_records_users",
+    "description": "payment_records to users",
+    "tables": [
+      "payment_records",
+      "users"
+    ],
+    "edges": [
+      {
+        "left_table": "payment_records",
+        "left_field": "user_id",
+        "right_table": "users",
+        "right_field": "user_id",
+        "join_type": "inner"
+      }
+    ]
+  }
+]
+
+==================================================
+FILE PATH: data\metric_kb.json
+==================================================
+[
+  {
+    "metric_id": "sum_bills_bill_id",
+    "name": "sum_bill_id",
+    "definition": "SUM of bills.bill_id",
+    "formula": "SUM(bill_id)",
+    "required_fields": [
+      "bills.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_bill_id",
+    "name": "avg_bill_id",
+    "definition": "AVG of bills.bill_id",
+    "formula": "AVG(bill_id)",
+    "required_fields": [
+      "bills.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_bill_id",
+    "name": "max_bill_id",
+    "definition": "MAX of bills.bill_id",
+    "formula": "MAX(bill_id)",
+    "required_fields": [
+      "bills.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_bill_id",
+    "name": "min_bill_id",
+    "definition": "MIN of bills.bill_id",
+    "formula": "MIN(bill_id)",
+    "required_fields": [
+      "bills.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_bills_user_id",
+    "name": "sum_user_id",
+    "definition": "SUM of bills.user_id",
+    "formula": "SUM(user_id)",
+    "required_fields": [
+      "bills.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_user_id",
+    "name": "avg_user_id",
+    "definition": "AVG of bills.user_id",
+    "formula": "AVG(user_id)",
+    "required_fields": [
+      "bills.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_user_id",
+    "name": "max_user_id",
+    "definition": "MAX of bills.user_id",
+    "formula": "MAX(user_id)",
+    "required_fields": [
+      "bills.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_user_id",
+    "name": "min_user_id",
+    "definition": "MIN of bills.user_id",
+    "formula": "MIN(user_id)",
+    "required_fields": [
+      "bills.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_bills_meter_id",
+    "name": "sum_meter_id",
+    "definition": "SUM of bills.meter_id",
+    "formula": "SUM(meter_id)",
+    "required_fields": [
+      "bills.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_meter_id",
+    "name": "avg_meter_id",
+    "definition": "AVG of bills.meter_id",
+    "formula": "AVG(meter_id)",
+    "required_fields": [
+      "bills.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_meter_id",
+    "name": "max_meter_id",
+    "definition": "MAX of bills.meter_id",
+    "formula": "MAX(meter_id)",
+    "required_fields": [
+      "bills.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_meter_id",
+    "name": "min_meter_id",
+    "definition": "MIN of bills.meter_id",
+    "formula": "MIN(meter_id)",
+    "required_fields": [
+      "bills.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_bills_total_consumption",
+    "name": "sum_total_consumption",
+    "definition": "SUM of bills.total_consumption",
+    "formula": "SUM(total_consumption)",
+    "required_fields": [
+      "bills.total_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_total_consumption",
+    "name": "avg_total_consumption",
+    "definition": "AVG of bills.total_consumption",
+    "formula": "AVG(total_consumption)",
+    "required_fields": [
+      "bills.total_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_total_consumption",
+    "name": "max_total_consumption",
+    "definition": "MAX of bills.total_consumption",
+    "formula": "MAX(total_consumption)",
+    "required_fields": [
+      "bills.total_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_total_consumption",
+    "name": "min_total_consumption",
+    "definition": "MIN of bills.total_consumption",
+    "formula": "MIN(total_consumption)",
+    "required_fields": [
+      "bills.total_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_bills_total_amount",
+    "name": "sum_total_amount",
+    "definition": "SUM of bills.total_amount",
+    "formula": "SUM(total_amount)",
+    "required_fields": [
+      "bills.total_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_total_amount",
+    "name": "avg_total_amount",
+    "definition": "AVG of bills.total_amount",
+    "formula": "AVG(total_amount)",
+    "required_fields": [
+      "bills.total_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_total_amount",
+    "name": "max_total_amount",
+    "definition": "MAX of bills.total_amount",
+    "formula": "MAX(total_amount)",
+    "required_fields": [
+      "bills.total_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_total_amount",
+    "name": "min_total_amount",
+    "definition": "MIN of bills.total_amount",
+    "formula": "MIN(total_amount)",
+    "required_fields": [
+      "bills.total_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_price_id",
+    "name": "sum_price_id",
+    "definition": "SUM of electricity_prices.price_id",
+    "formula": "SUM(price_id)",
+    "required_fields": [
+      "electricity_prices.price_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_price_id",
+    "name": "avg_price_id",
+    "definition": "AVG of electricity_prices.price_id",
+    "formula": "AVG(price_id)",
+    "required_fields": [
+      "electricity_prices.price_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_price_id",
+    "name": "max_price_id",
+    "definition": "MAX of electricity_prices.price_id",
+    "formula": "MAX(price_id)",
+    "required_fields": [
+      "electricity_prices.price_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_price_id",
+    "name": "min_price_id",
+    "definition": "MIN of electricity_prices.price_id",
+    "formula": "MIN(price_id)",
+    "required_fields": [
+      "electricity_prices.price_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_tier_level",
+    "name": "sum_tier_level",
+    "definition": "SUM of electricity_prices.tier_level",
+    "formula": "SUM(tier_level)",
+    "required_fields": [
+      "electricity_prices.tier_level"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_tier_level",
+    "name": "avg_tier_level",
+    "definition": "AVG of electricity_prices.tier_level",
+    "formula": "AVG(tier_level)",
+    "required_fields": [
+      "electricity_prices.tier_level"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_tier_level",
+    "name": "max_tier_level",
+    "definition": "MAX of electricity_prices.tier_level",
+    "formula": "MAX(tier_level)",
+    "required_fields": [
+      "electricity_prices.tier_level"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_tier_level",
+    "name": "min_tier_level",
+    "definition": "MIN of electricity_prices.tier_level",
+    "formula": "MIN(tier_level)",
+    "required_fields": [
+      "electricity_prices.tier_level"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_min_consumption",
+    "name": "sum_min_consumption",
+    "definition": "SUM of electricity_prices.min_consumption",
+    "formula": "SUM(min_consumption)",
+    "required_fields": [
+      "electricity_prices.min_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_min_consumption",
+    "name": "avg_min_consumption",
+    "definition": "AVG of electricity_prices.min_consumption",
+    "formula": "AVG(min_consumption)",
+    "required_fields": [
+      "electricity_prices.min_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_min_consumption",
+    "name": "max_min_consumption",
+    "definition": "MAX of electricity_prices.min_consumption",
+    "formula": "MAX(min_consumption)",
+    "required_fields": [
+      "electricity_prices.min_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_min_consumption",
+    "name": "min_min_consumption",
+    "definition": "MIN of electricity_prices.min_consumption",
+    "formula": "MIN(min_consumption)",
+    "required_fields": [
+      "electricity_prices.min_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_max_consumption",
+    "name": "sum_max_consumption",
+    "definition": "SUM of electricity_prices.max_consumption",
+    "formula": "SUM(max_consumption)",
+    "required_fields": [
+      "electricity_prices.max_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_max_consumption",
+    "name": "avg_max_consumption",
+    "definition": "AVG of electricity_prices.max_consumption",
+    "formula": "AVG(max_consumption)",
+    "required_fields": [
+      "electricity_prices.max_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_max_consumption",
+    "name": "max_max_consumption",
+    "definition": "MAX of electricity_prices.max_consumption",
+    "formula": "MAX(max_consumption)",
+    "required_fields": [
+      "electricity_prices.max_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_max_consumption",
+    "name": "min_max_consumption",
+    "definition": "MIN of electricity_prices.max_consumption",
+    "formula": "MIN(max_consumption)",
+    "required_fields": [
+      "electricity_prices.max_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_unit_price",
+    "name": "sum_unit_price",
+    "definition": "SUM of electricity_prices.unit_price",
+    "formula": "SUM(unit_price)",
+    "required_fields": [
+      "electricity_prices.unit_price"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_unit_price",
+    "name": "avg_unit_price",
+    "definition": "AVG of electricity_prices.unit_price",
+    "formula": "AVG(unit_price)",
+    "required_fields": [
+      "electricity_prices.unit_price"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_unit_price",
+    "name": "max_unit_price",
+    "definition": "MAX of electricity_prices.unit_price",
+    "formula": "MAX(unit_price)",
+    "required_fields": [
+      "electricity_prices.unit_price"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_unit_price",
+    "name": "min_unit_price",
+    "definition": "MIN of electricity_prices.unit_price",
+    "formula": "MIN(unit_price)",
+    "required_fields": [
+      "electricity_prices.unit_price"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_is_current",
+    "name": "sum_is_current",
+    "definition": "SUM of electricity_prices.is_current",
+    "formula": "SUM(is_current)",
+    "required_fields": [
+      "electricity_prices.is_current"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_is_current",
+    "name": "avg_is_current",
+    "definition": "AVG of electricity_prices.is_current",
+    "formula": "AVG(is_current)",
+    "required_fields": [
+      "electricity_prices.is_current"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_is_current",
+    "name": "max_is_current",
+    "definition": "MAX of electricity_prices.is_current",
+    "formula": "MAX(is_current)",
+    "required_fields": [
+      "electricity_prices.is_current"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_is_current",
+    "name": "min_is_current",
+    "definition": "MIN of electricity_prices.is_current",
+    "formula": "MIN(is_current)",
+    "required_fields": [
+      "electricity_prices.is_current"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_record_id",
+    "name": "sum_record_id",
+    "definition": "SUM of electricity_records.record_id",
+    "formula": "SUM(record_id)",
+    "required_fields": [
+      "electricity_records.record_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_record_id",
+    "name": "avg_record_id",
+    "definition": "AVG of electricity_records.record_id",
+    "formula": "AVG(record_id)",
+    "required_fields": [
+      "electricity_records.record_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_record_id",
+    "name": "max_record_id",
+    "definition": "MAX of electricity_records.record_id",
+    "formula": "MAX(record_id)",
+    "required_fields": [
+      "electricity_records.record_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_record_id",
+    "name": "min_record_id",
+    "definition": "MIN of electricity_records.record_id",
+    "formula": "MIN(record_id)",
+    "required_fields": [
+      "electricity_records.record_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_meter_id",
+    "name": "sum_meter_id",
+    "definition": "SUM of electricity_records.meter_id",
+    "formula": "SUM(meter_id)",
+    "required_fields": [
+      "electricity_records.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_meter_id",
+    "name": "avg_meter_id",
+    "definition": "AVG of electricity_records.meter_id",
+    "formula": "AVG(meter_id)",
+    "required_fields": [
+      "electricity_records.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_meter_id",
+    "name": "max_meter_id",
+    "definition": "MAX of electricity_records.meter_id",
+    "formula": "MAX(meter_id)",
+    "required_fields": [
+      "electricity_records.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_meter_id",
+    "name": "min_meter_id",
+    "definition": "MIN of electricity_records.meter_id",
+    "formula": "MIN(meter_id)",
+    "required_fields": [
+      "electricity_records.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_current_reading",
+    "name": "sum_current_reading",
+    "definition": "SUM of electricity_records.current_reading",
+    "formula": "SUM(current_reading)",
+    "required_fields": [
+      "electricity_records.current_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_current_reading",
+    "name": "avg_current_reading",
+    "definition": "AVG of electricity_records.current_reading",
+    "formula": "AVG(current_reading)",
+    "required_fields": [
+      "electricity_records.current_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_current_reading",
+    "name": "max_current_reading",
+    "definition": "MAX of electricity_records.current_reading",
+    "formula": "MAX(current_reading)",
+    "required_fields": [
+      "electricity_records.current_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_current_reading",
+    "name": "min_current_reading",
+    "definition": "MIN of electricity_records.current_reading",
+    "formula": "MIN(current_reading)",
+    "required_fields": [
+      "electricity_records.current_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_previous_reading",
+    "name": "sum_previous_reading",
+    "definition": "SUM of electricity_records.previous_reading",
+    "formula": "SUM(previous_reading)",
+    "required_fields": [
+      "electricity_records.previous_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_previous_reading",
+    "name": "avg_previous_reading",
+    "definition": "AVG of electricity_records.previous_reading",
+    "formula": "AVG(previous_reading)",
+    "required_fields": [
+      "electricity_records.previous_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_previous_reading",
+    "name": "max_previous_reading",
+    "definition": "MAX of electricity_records.previous_reading",
+    "formula": "MAX(previous_reading)",
+    "required_fields": [
+      "electricity_records.previous_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_previous_reading",
+    "name": "min_previous_reading",
+    "definition": "MIN of electricity_records.previous_reading",
+    "formula": "MIN(previous_reading)",
+    "required_fields": [
+      "electricity_records.previous_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_consumption",
+    "name": "sum_consumption",
+    "definition": "SUM of electricity_records.consumption",
+    "formula": "SUM(consumption)",
+    "required_fields": [
+      "electricity_records.consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_consumption",
+    "name": "avg_consumption",
+    "definition": "AVG of electricity_records.consumption",
+    "formula": "AVG(consumption)",
+    "required_fields": [
+      "electricity_records.consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_consumption",
+    "name": "max_consumption",
+    "definition": "MAX of electricity_records.consumption",
+    "formula": "MAX(consumption)",
+    "required_fields": [
+      "electricity_records.consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_consumption",
+    "name": "min_consumption",
+    "definition": "MIN of electricity_records.consumption",
+    "formula": "MIN(consumption)",
+    "required_fields": [
+      "electricity_records.consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_peak_consumption",
+    "name": "sum_peak_consumption",
+    "definition": "SUM of electricity_records.peak_consumption",
+    "formula": "SUM(peak_consumption)",
+    "required_fields": [
+      "electricity_records.peak_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_peak_consumption",
+    "name": "avg_peak_consumption",
+    "definition": "AVG of electricity_records.peak_consumption",
+    "formula": "AVG(peak_consumption)",
+    "required_fields": [
+      "electricity_records.peak_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_peak_consumption",
+    "name": "max_peak_consumption",
+    "definition": "MAX of electricity_records.peak_consumption",
+    "formula": "MAX(peak_consumption)",
+    "required_fields": [
+      "electricity_records.peak_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_peak_consumption",
+    "name": "min_peak_consumption",
+    "definition": "MIN of electricity_records.peak_consumption",
+    "formula": "MIN(peak_consumption)",
+    "required_fields": [
+      "electricity_records.peak_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_valley_consumption",
+    "name": "sum_valley_consumption",
+    "definition": "SUM of electricity_records.valley_consumption",
+    "formula": "SUM(valley_consumption)",
+    "required_fields": [
+      "electricity_records.valley_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_valley_consumption",
+    "name": "avg_valley_consumption",
+    "definition": "AVG of electricity_records.valley_consumption",
+    "formula": "AVG(valley_consumption)",
+    "required_fields": [
+      "electricity_records.valley_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_valley_consumption",
+    "name": "max_valley_consumption",
+    "definition": "MAX of electricity_records.valley_consumption",
+    "formula": "MAX(valley_consumption)",
+    "required_fields": [
+      "electricity_records.valley_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_valley_consumption",
+    "name": "min_valley_consumption",
+    "definition": "MIN of electricity_records.valley_consumption",
+    "formula": "MIN(valley_consumption)",
+    "required_fields": [
+      "electricity_records.valley_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_meters_meter_id",
+    "name": "sum_meter_id",
+    "definition": "SUM of meters.meter_id",
+    "formula": "SUM(meter_id)",
+    "required_fields": [
+      "meters.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_meters_meter_id",
+    "name": "avg_meter_id",
+    "definition": "AVG of meters.meter_id",
+    "formula": "AVG(meter_id)",
+    "required_fields": [
+      "meters.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_meters_meter_id",
+    "name": "max_meter_id",
+    "definition": "MAX of meters.meter_id",
+    "formula": "MAX(meter_id)",
+    "required_fields": [
+      "meters.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_meters_meter_id",
+    "name": "min_meter_id",
+    "definition": "MIN of meters.meter_id",
+    "formula": "MIN(meter_id)",
+    "required_fields": [
+      "meters.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_meters_user_id",
+    "name": "sum_user_id",
+    "definition": "SUM of meters.user_id",
+    "formula": "SUM(user_id)",
+    "required_fields": [
+      "meters.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_meters_user_id",
+    "name": "avg_user_id",
+    "definition": "AVG of meters.user_id",
+    "formula": "AVG(user_id)",
+    "required_fields": [
+      "meters.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_meters_user_id",
+    "name": "max_user_id",
+    "definition": "MAX of meters.user_id",
+    "formula": "MAX(user_id)",
+    "required_fields": [
+      "meters.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_meters_user_id",
+    "name": "min_user_id",
+    "definition": "MIN of meters.user_id",
+    "formula": "MIN(user_id)",
+    "required_fields": [
+      "meters.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_meters_capacity",
+    "name": "sum_capacity",
+    "definition": "SUM of meters.capacity",
+    "formula": "SUM(capacity)",
+    "required_fields": [
+      "meters.capacity"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_meters_capacity",
+    "name": "avg_capacity",
+    "definition": "AVG of meters.capacity",
+    "formula": "AVG(capacity)",
+    "required_fields": [
+      "meters.capacity"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_meters_capacity",
+    "name": "max_capacity",
+    "definition": "MAX of meters.capacity",
+    "formula": "MAX(capacity)",
+    "required_fields": [
+      "meters.capacity"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_meters_capacity",
+    "name": "min_capacity",
+    "definition": "MIN of meters.capacity",
+    "formula": "MIN(capacity)",
+    "required_fields": [
+      "meters.capacity"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_payment_records_payment_id",
+    "name": "sum_payment_id",
+    "definition": "SUM of payment_records.payment_id",
+    "formula": "SUM(payment_id)",
+    "required_fields": [
+      "payment_records.payment_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_payment_records_payment_id",
+    "name": "avg_payment_id",
+    "definition": "AVG of payment_records.payment_id",
+    "formula": "AVG(payment_id)",
+    "required_fields": [
+      "payment_records.payment_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_payment_records_payment_id",
+    "name": "max_payment_id",
+    "definition": "MAX of payment_records.payment_id",
+    "formula": "MAX(payment_id)",
+    "required_fields": [
+      "payment_records.payment_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_payment_records_payment_id",
+    "name": "min_payment_id",
+    "definition": "MIN of payment_records.payment_id",
+    "formula": "MIN(payment_id)",
+    "required_fields": [
+      "payment_records.payment_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_payment_records_bill_id",
+    "name": "sum_bill_id",
+    "definition": "SUM of payment_records.bill_id",
+    "formula": "SUM(bill_id)",
+    "required_fields": [
+      "payment_records.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_payment_records_bill_id",
+    "name": "avg_bill_id",
+    "definition": "AVG of payment_records.bill_id",
+    "formula": "AVG(bill_id)",
+    "required_fields": [
+      "payment_records.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_payment_records_bill_id",
+    "name": "max_bill_id",
+    "definition": "MAX of payment_records.bill_id",
+    "formula": "MAX(bill_id)",
+    "required_fields": [
+      "payment_records.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_payment_records_bill_id",
+    "name": "min_bill_id",
+    "definition": "MIN of payment_records.bill_id",
+    "formula": "MIN(bill_id)",
+    "required_fields": [
+      "payment_records.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_payment_records_user_id",
+    "name": "sum_user_id",
+    "definition": "SUM of payment_records.user_id",
+    "formula": "SUM(user_id)",
+    "required_fields": [
+      "payment_records.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_payment_records_user_id",
+    "name": "avg_user_id",
+    "definition": "AVG of payment_records.user_id",
+    "formula": "AVG(user_id)",
+    "required_fields": [
+      "payment_records.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_payment_records_user_id",
+    "name": "max_user_id",
+    "definition": "MAX of payment_records.user_id",
+    "formula": "MAX(user_id)",
+    "required_fields": [
+      "payment_records.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_payment_records_user_id",
+    "name": "min_user_id",
+    "definition": "MIN of payment_records.user_id",
+    "formula": "MIN(user_id)",
+    "required_fields": [
+      "payment_records.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_payment_records_payment_amount",
+    "name": "sum_payment_amount",
+    "definition": "SUM of payment_records.payment_amount",
+    "formula": "SUM(payment_amount)",
+    "required_fields": [
+      "payment_records.payment_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_payment_records_payment_amount",
+    "name": "avg_payment_amount",
+    "definition": "AVG of payment_records.payment_amount",
+    "formula": "AVG(payment_amount)",
+    "required_fields": [
+      "payment_records.payment_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_payment_records_payment_amount",
+    "name": "max_payment_amount",
+    "definition": "MAX of payment_records.payment_amount",
+    "formula": "MAX(payment_amount)",
+    "required_fields": [
+      "payment_records.payment_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_payment_records_payment_amount",
+    "name": "min_payment_amount",
+    "definition": "MIN of payment_records.payment_amount",
+    "formula": "MIN(payment_amount)",
+    "required_fields": [
+      "payment_records.payment_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_users_user_id",
+    "name": "sum_user_id",
+    "definition": "SUM of users.user_id",
+    "formula": "SUM(user_id)",
+    "required_fields": [
+      "users.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_users_user_id",
+    "name": "avg_user_id",
+    "definition": "AVG of users.user_id",
+    "formula": "AVG(user_id)",
+    "required_fields": [
+      "users.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_users_user_id",
+    "name": "max_user_id",
+    "definition": "MAX of users.user_id",
+    "formula": "MAX(user_id)",
+    "required_fields": [
+      "users.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_users_user_id",
+    "name": "min_user_id",
+    "definition": "MIN of users.user_id",
+    "formula": "MIN(user_id)",
+    "required_fields": [
+      "users.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  }
+]
+
+==================================================
+FILE PATH: data\schema_kb.json
+==================================================
+[
+  {
+    "table": "bills",
+    "field": "bill_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "bigint",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "user_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "meter_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "billing_month",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "total_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "total_amount",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "due_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "payment_status",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "bills",
+    "field": "paid_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "bills",
+    "field": "created_at",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "timestamp",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "price_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "user_type",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "electricity_prices",
+    "field": "tier_level",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "min_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "max_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "unit_price",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "effective_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "electricity_prices",
+    "field": "is_current",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "tinyint",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "record_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "bigint",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "meter_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "reading_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "current_reading",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "previous_reading",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "peak_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "valley_consumption",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "electricity_records",
+    "field": "record_status",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "electricity_records",
+    "field": "recorded_by",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "electricity_records",
+    "field": "created_at",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "timestamp",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "meter_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "user_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "meter_number",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "meters",
+    "field": "meter_type",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "meters",
+    "field": "capacity",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "installation_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "date",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "meters",
+    "field": "status",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "payment_records",
+    "field": "payment_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "bigint",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "bill_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "bigint",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "user_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "foreign_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "payment_amount",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "decimal",
+    "quality_tags": [
+      "metric"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "payment_method",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "payment_records",
+    "field": "payment_date",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "timestamp",
+    "quality_tags": [
+      "time"
+    ]
+  },
+  {
+    "table": "payment_records",
+    "field": "transaction_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "payment_records",
+    "field": "status",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "user_id",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "int",
+    "quality_tags": [
+      "primary_key",
+      "metric"
+    ]
+  },
+  {
+    "table": "users",
+    "field": "username",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "password",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "real_name",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "phone",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "email",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "varchar",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "address",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "text",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "user_type",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "enum",
+    "quality_tags": []
+  },
+  {
+    "table": "users",
+    "field": "created_at",
+    "field_desc": "",
+    "aliases": [],
+    "unit": "",
+    "data_type": "timestamp",
+    "quality_tags": [
+      "time"
+    ]
+  }
+]
+
+==================================================
+FILE PATH: data\template_kb.json
+==================================================
+[
+  {
+    "template_id": "trend_template",
+    "intent": "trend",
+    "allowed_aggs": [
+      "sum",
+      "avg",
+      "max",
+      "min"
+    ],
+    "allowed_funcs": [
+      "date_format",
+      "yearweek",
+      "from_unixtime",
+      "unix_timestamp"
+    ],
+    "required_clauses": [
+      "time_range",
+      "time_grain",
+      "group_by_time"
+    ]
+  },
+  {
+    "template_id": "rank_template",
+    "intent": "rank",
+    "allowed_aggs": [
+      "sum",
+      "avg",
+      "max",
+      "min"
+    ],
+    "allowed_funcs": [],
+    "required_clauses": [
+      "order_by",
+      "limit"
+    ]
+  },
+  {
+    "template_id": "aggregate_template",
+    "intent": "aggregate",
+    "allowed_aggs": [
+      "sum",
+      "avg",
+      "max",
+      "min"
+    ],
+    "allowed_funcs": [],
+    "required_clauses": [
+      "time_range"
+    ]
+  },
+  {
+    "template_id": "compare_template",
+    "intent": "compare",
+    "allowed_aggs": [
+      "sum",
+      "avg",
+      "max",
+      "min"
+    ],
+    "allowed_funcs": [
+      "date_format",
+      "yearweek",
+      "from_unixtime",
+      "unix_timestamp"
+    ],
+    "required_clauses": [
+      "time_range"
+    ]
+  }
+]
+
+==================================================
+FILE PATH: prompts\answer_generate.txt
+==================================================
+你是电力数据分析助手。请根据查询结果生成简洁中文回答。
+
+约束：
+- 不要编造数据，只能基于 result_preview。
+- 必须包含：指标口径解释（来自 metric_definition）、时间范围、主要结论（1-3条）、可视化建议（折线/柱状/热力等之一）。
+- 如结果为空：说明可能原因（时间范围、筛选条件、数据质量），并给出可执行的改问建议。
+
+输入：
+- question
+- plan_dsl
+- sql
+- metric_definition
+- result_preview（最多 20 行）
+
+
+==================================================
+FILE PATH: prompts\plan_generate.txt
+==================================================
+系统角色：你是电力数据查询助手，但你不能编写 SQL。你只能根据检索证据输出“查询计划 DSL(JSON)”。
+
+# 你必须遵守：
+- 只输出一个 JSON 对象，不要输出任何解释、注释、Markdown、前后缀文本。
+- JSON 必须符合提供的 JSON Schema。
+- 只能使用证据里出现的 metric_id、table/field、join_path_id、time_grain 候选。
+- 如果证据不足以确定，请在 `clarifications` 中列出需要用户补充的信息；但仍需给出 best-effort 的 plan（标记 confidence 低）。
+
+# 输入给你：
+(1) 用户问题 question
+(2) user_context: role/tenant
+(3) RAG 证据 evidence：
+- metric_candidates: [{metric_id,name,definition,default_time_grain,unit,required_fields}]
+- schema_candidates: [{table,field,field_desc,aliases,unit,data_type,quality_tags}]
+- join_paths: [{join_path_id, description, tables, edges}]
+- template_rules: [{template_id, intent, allowed_aggs, allowed_funcs, required_clauses}]
+
+# 你的任务：
+1) 把 question 解析为：metric_id、dimensions、time_range、time_grain、filters、sort/limit、output_format。
+2) 必须选择一个 join_path_id（若不需要 join，可填 "NONE"）。
+3) 如果 question 涉及指标口径，必须把 metric_id 写入 plan，并在 `metric_params` 中补齐口径要求。
+4) 输出 PlanDSL JSON。
+
+
+==================================================
+FILE PATH: prompts\plan_repair.txt
+==================================================
+系统角色：你是 DSL 修复器。你只能修改给定的 PlanDSL JSON，使其通过校验。你不能输出 SQL，也不能输出解释。
+
+# 必须遵守：
+- 只输出一个 JSON 对象，不要输出任何其他文本。
+- 输出 JSON 必须完全符合 JSON Schema。
+- 仅修改必要字段；保留未被要求修改的字段不变（字段顺序可不同）。
+- 只能使用“可用候选”里列出的 metric_id/field/join_path_id/time_grain 值。
+- 若无法修复，必须在 `errors_unresolved` 填写原因，并给出最接近的可行 plan（例如降级到更粗粒度、更少维度）。
+
+# 输入给你：
+(1) 原始 PlanDSL JSON: original_plan
+(2) 校验错误列表 validation_errors: [{code, message, field_path, suggestions}]
+(3) 更新后的 RAG 证据 evidence
+(4) JSON Schema
+
+# 输出：
+修复后的 PlanDSL JSON
+
+
+==================================================
+FILE PATH: schemas\plan_dsl.schema.json
+==================================================
+{
+  "type": "object",
+  "required": ["version", "intent", "metric_id", "dimensions", "time_range", "time_grain", "filters", "join_path_id", "output", "confidence", "clarifications"],
+  "properties": {
+    "version": { "type": "string", "enum": ["1.0"] },
+    "intent": { "type": "string", "enum": ["trend", "aggregate", "rank", "compare", "detail"] },
+    "metric_id": { "type": "string" },
+    "metric_params": { "type": "object", "additionalProperties": true },
+    "dimensions": {
+      "type": "array",
+      "items": { "type": "object", "required": ["table", "field"], "properties": { "table": { "type": "string" }, "field": { "type": "string" } } }
+    },
+    "time_range": {
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": { "start": { "type": "string" }, "end": { "type": "string" } }
+    },
+    "time_grain": { "type": "string", "enum": ["15m", "hour", "day", "week", "month"] },
+    "filters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["table", "field", "op", "value"],
+        "properties": {
+          "table": { "type": "string" },
+          "field": { "type": "string" },
+          "op": { "type": "string", "enum": ["=", "!=", ">", ">=", "<", "<=", "in", "like", "between"] },
+          "value": {}
+        }
+      }
+    },
+    "join_path_id": { "type": "string" },
+    "sort": {
+      "type": "object",
+      "required": ["by", "order"],
+      "properties": { "by": { "type": "string" }, "order": { "type": "string", "enum": ["asc", "desc"] } }
+    },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 10000 },
+    "output": {
+      "type": "object",
+      "required": ["format", "chart_suggest"],
+      "properties": {
+        "format": { "type": "string", "enum": ["table", "single_value"] },
+        "chart_suggest": { "type": "string", "enum": ["line", "bar", "heatmap", "none"] }
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "clarifications": { "type": "array", "items": { "type": "string" } },
+    "errors_unresolved": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}
+
+
+==================================================
+FILE PATH: scripts\generate_generic_kb.py
+==================================================
+import json
+from pathlib import Path
+
+
+NUMERIC_TYPES = {
+    "int",
+    "bigint",
+    "smallint",
+    "mediumint",
+    "tinyint",
+    "decimal",
+    "float",
+    "double",
+    "numeric",
+}
+
+
+def _load_schema(path: str):
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return data
+
+
+def _build_metric_name(prefix: str, field_desc: str, field: str) -> str:
+    label = field_desc.strip() or field
+    return f"{prefix}_{label}"
+
+
+def build_metrics(schema_items):
+    metrics = []
+    for item in schema_items:
+        data_type = (item.get("data_type") or "").lower()
+        if data_type not in NUMERIC_TYPES:
+            continue
+        table = item["table"]
+        field = item["field"]
+        field_desc = item.get("field_desc", "")
+        unit = item.get("unit", "")
+        for agg in ["sum", "avg", "max", "min"]:
+            metric_id = f"{agg}_{table}_{field}"
+            name = _build_metric_name(agg, field_desc, field)
+            formula = f"{agg.upper()}({field})"
+            metrics.append(
+                {
+                    "metric_id": metric_id,
+                    "name": name,
+                    "definition": f"{agg.upper()} of {table}.{field}",
+                    "formula": formula,
+                    "required_fields": [f"{table}.{field}"],
+                    "default_time_grain": "day",
+                    "unit": unit,
+                }
+            )
+    return metrics
+
+
+def build_templates():
+    return [
+        {
+            "template_id": "trend_template",
+            "intent": "trend",
+            "allowed_aggs": ["sum", "avg", "max", "min"],
+            "allowed_funcs": ["date_format", "yearweek", "from_unixtime", "unix_timestamp"],
+            "required_clauses": ["time_range", "time_grain", "group_by_time"],
+        },
+        {
+            "template_id": "rank_template",
+            "intent": "rank",
+            "allowed_aggs": ["sum", "avg", "max", "min"],
+            "allowed_funcs": [],
+            "required_clauses": ["order_by", "limit"],
+        },
+        {
+            "template_id": "aggregate_template",
+            "intent": "aggregate",
+            "allowed_aggs": ["sum", "avg", "max", "min"],
+            "allowed_funcs": [],
+            "required_clauses": ["time_range"],
+        },
+        {
+            "template_id": "compare_template",
+            "intent": "compare",
+            "allowed_aggs": ["sum", "avg", "max", "min"],
+            "allowed_funcs": ["date_format", "yearweek", "from_unixtime", "unix_timestamp"],
+            "required_clauses": ["time_range"],
+        },
+    ]
+
+
+def main() -> None:
+    schema_items = _load_schema("data/schema_kb.json")
+    metrics = build_metrics(schema_items)
+    templates = build_templates()
+
+    Path("data/metric_kb.json").write_text(
+        json.dumps(metrics, ensure_ascii=True, indent=2), encoding="utf-8"
+    )
+    Path("data/template_kb.json").write_text(
+        json.dumps(templates, ensure_ascii=True, indent=2), encoding="utf-8"
+    )
+
+    print("Updated:")
+    print("- data/metric_kb.json (generic metrics)")
+    print("- data/template_kb.json (generic templates)")
+
+
+if __name__ == "__main__":
+    main()
+
+
+==================================================
+FILE PATH: scripts\sync_kb_from_mysql.py
+==================================================
+import json
+import os
+from collections import defaultdict
+from typing import Dict, List, Tuple
+
+import pymysql
+from dotenv import load_dotenv
+
+
+TIME_FIELD_NAMES = {
+    "ts",
+    "timestamp",
+    "event_time",
+    "date",
+    "dt",
+    "created_at",
+    "updated_at",
+}
+NUMERIC_TYPES = {
+    "int",
+    "bigint",
+    "smallint",
+    "mediumint",
+    "tinyint",
+    "decimal",
+    "float",
+    "double",
+}
+
+
+def _get_env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+def _connect() -> pymysql.connections.Connection:
+    host = _get_env("TEXT2SQL_MYSQL_HOST", "127.0.0.1")
+    port = int(_get_env("TEXT2SQL_MYSQL_PORT", "3306"))
+    user = _get_env("TEXT2SQL_MYSQL_USER", "root")
+    password = _get_env("TEXT2SQL_MYSQL_PASSWORD", "")
+    database = _get_env("TEXT2SQL_MYSQL_DATABASE", "")
+    if not database:
+        raise ValueError("TEXT2SQL_MYSQL_DATABASE is required")
+    return pymysql.connect(
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        database=database,
+        charset="utf8mb4",
+        connect_timeout=5,
+        read_timeout=10,
+    )
+
+
+def load_columns(conn: pymysql.connections.Connection, schema: str) -> List[Dict]:
+    sql = """
+        SELECT table_name,
+               column_name,
+               data_type,
+               column_comment,
+               column_key
+        FROM information_schema.columns
+        WHERE table_schema = %s
+        ORDER BY table_name, ordinal_position
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (schema,))
+        rows = cur.fetchall()
+    columns = []
+    for row in rows:
+        table, column, data_type, comment, column_key = row
+        columns.append(
+            {
+                "table": table,
+                "field": column,
+                "data_type": data_type or "",
+                "field_desc": comment or "",
+                "column_key": column_key or "",
+            }
+        )
+    return columns
+
+
+def load_foreign_keys(conn: pymysql.connections.Connection, schema: str) -> List[Dict]:
+    sql = """
+        SELECT table_name,
+               column_name,
+               referenced_table_name,
+               referenced_column_name
+        FROM information_schema.key_column_usage
+        WHERE table_schema = %s
+          AND referenced_table_name IS NOT NULL
+          AND referenced_column_name IS NOT NULL
+        ORDER BY table_name, column_name
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (schema,))
+        rows = cur.fetchall()
+    fks = []
+    for row in rows:
+        table, column, ref_table, ref_column = row
+        fks.append(
+            {
+                "table": table,
+                "column": column,
+                "ref_table": ref_table,
+                "ref_column": ref_column,
+            }
+        )
+    return fks
+
+
+def build_schema_kb(columns: List[Dict], fks: List[Dict]) -> List[Dict]:
+    fk_set = {(fk["table"], fk["column"]) for fk in fks}
+    items = []
+    for col in columns:
+        data_type = (col.get("data_type") or "").lower()
+        field = col["field"]
+        tags = []
+        if col.get("column_key") == "PRI":
+            tags.append("primary_key")
+        if (col["table"], field) in fk_set:
+            tags.append("foreign_key")
+        if field.lower() in TIME_FIELD_NAMES or data_type in {"date", "datetime", "timestamp"}:
+            tags.append("time")
+        if data_type in NUMERIC_TYPES:
+            tags.append("metric")
+        items.append(
+            {
+                "table": col["table"],
+                "field": field,
+                "field_desc": col.get("field_desc", ""),
+                "aliases": [],
+                "unit": "",
+                "data_type": data_type,
+                "quality_tags": tags,
+            }
+        )
+    return items
+
+
+def build_join_kb(fks: List[Dict]) -> List[Dict]:
+    items = []
+    counter: Dict[Tuple[str, str], int] = defaultdict(int)
+    for fk in fks:
+        left = fk["table"]
+        right = fk["ref_table"]
+        key = (left, right)
+        counter[key] += 1
+        suffix = f"_{counter[key]}" if counter[key] > 1 else ""
+        join_id = f"{left}_{right}{suffix}"
+        items.append(
+            {
+                "join_path_id": join_id,
+                "description": f"{left} to {right}",
+                "tables": [left, right],
+                "edges": [
+                    {
+                        "left_table": left,
+                        "left_field": fk["column"],
+                        "right_table": right,
+                        "right_field": fk["ref_column"],
+                        "join_type": "inner",
+                    }
+                ],
+            }
+        )
+    return items
+
+
+def main() -> None:
+    load_dotenv()
+    schema = _get_env("TEXT2SQL_MYSQL_DATABASE", "")
+    if not schema:
+        raise ValueError("TEXT2SQL_MYSQL_DATABASE is required in .env")
+    conn = _connect()
+    try:
+        columns = load_columns(conn, schema)
+        fks = load_foreign_keys(conn, schema)
+    finally:
+        conn.close()
+
+    schema_kb = build_schema_kb(columns, fks)
+    join_kb = build_join_kb(fks)
+
+    with open("data/schema_kb.json", "w", encoding="utf-8") as f:
+        json.dump(schema_kb, f, ensure_ascii=True, indent=2)
+    with open("data/join_kb.json", "w", encoding="utf-8") as f:
+        json.dump(join_kb, f, ensure_ascii=True, indent=2)
+
+    print("Updated:")
+    print("- data/schema_kb.json")
+    print("- data/join_kb.json")
+    print("Note: metric_kb.json and template_kb.json are not auto-generated.")
+
+
+if __name__ == "__main__":
+    main()
+
+
+==================================================
+FILE PATH: tests\test_compiler_guard.py
+==================================================
+import pytest
+
+from app.core.compile.compiler import SqlCompiler
+from app.core.models import EvidenceBundle, MetricDef, PlanDSL, SchemaEntity, TemplateRule, Dimension, OutputSpec, TimeRange
+
+
+def test_compiler_guard_rejects_unauthorized_field():
+    evidence = EvidenceBundle(
+        metric_candidates=[
+            MetricDef(
+                metric_id="load_rate",
+                name="Load rate",
+                definition="",
+                formula="",
+                required_fields=["feeder.load_kw", "feeder.capacity_kw"],
+                default_time_grain="day",
+                unit="ratio",
+            )
+        ],
+        schema_candidates=[
+            SchemaEntity(
+                table="feeder",
+                field="feeder_id",
+                field_desc="",
+                aliases=[],
+                unit="",
+                data_type="string",
+                quality_tags=[],
+            )
+        ],
+        join_paths=[],
+        template_rules=[
+            TemplateRule(
+                template_id="trend_template",
+                intent="trend",
+                allowed_aggs=["sum"],
+                allowed_funcs=[],
+                required_clauses=["time_range"],
+            )
+        ],
+    )
+
+    plan = PlanDSL(
+        version="1.0",
+        intent="trend",
+        metric_id="load_rate",
+        metric_params={},
+        dimensions=[Dimension(table="feeder", field="bad_field")],
+        time_range=TimeRange(start="2024-01-01", end="2024-01-31"),
+        time_grain="day",
+        filters=[],
+        join_path_id="NONE",
+        sort=None,
+        limit=10,
+        output=OutputSpec(format="table", chart_suggest="line"),
+        confidence=0.5,
+        clarifications=[],
+    )
+
+    compiler = SqlCompiler()
+    with pytest.raises(ValueError):
+        compiler.compile(plan, evidence)
+
+
+==================================================
+FILE PATH: tests\test_join_path.py
+==================================================
+from app.core.models import EvidenceBundle, MetricDef, SchemaEntity, TemplateRule, JoinPath, JoinEdge
+from app.core.planning.validator import PlanValidator
+from app.core.schema import load_schema
+
+
+def test_join_path_not_found():
+    schema = load_schema("schemas/plan_dsl.schema.json")
+    validator = PlanValidator(schema)
+    evidence = EvidenceBundle(
+        metric_candidates=[
+            MetricDef(
+                metric_id="load_rate",
+                name="Load rate",
+                definition="",
+                formula="",
+                required_fields=["feeder.load_kw", "feeder.capacity_kw"],
+                default_time_grain="day",
+                unit="ratio",
+            )
+        ],
+        schema_candidates=[
+            SchemaEntity(
+                table="feeder",
+                field="ts",
+                field_desc="",
+                aliases=[],
+                unit="",
+                data_type="datetime",
+                quality_tags=[],
+            )
+        ],
+        join_paths=[
+            JoinPath(
+                join_path_id="valid_path",
+                description="",
+                tables=["feeder"],
+                edges=[
+                    JoinEdge(
+                        left_table="feeder",
+                        left_field="feeder_id",
+                        right_table="transformer",
+                        right_field="feeder_id",
+                        join_type="inner",
+                    )
+                ],
+            )
+        ],
+        template_rules=[
+            TemplateRule(
+                template_id="trend_template",
+                intent="trend",
+                allowed_aggs=["sum"],
+                allowed_funcs=[],
+                required_clauses=["time_range"],
+            )
+        ],
+    )
+
+    plan = {
+        "version": "1.0",
+        "intent": "trend",
+        "metric_id": "load_rate",
+        "metric_params": {},
+        "dimensions": [],
+        "time_range": {"start": "2024-01-01", "end": "2024-01-31"},
+        "time_grain": "day",
+        "filters": [],
+        "join_path_id": "missing_path",
+        "output": {"format": "table", "chart_suggest": "line"},
+        "confidence": 0.5,
+        "clarifications": [],
+    }
+
+    errors = validator.validate(plan, evidence)
+    assert any(e.code == "join_path_not_found" for e in errors)
+
+
+==================================================
+FILE PATH: tests\test_llm_json_guard.py
+==================================================
+import pytest
+
+from app.core.config import get_settings
+from app.core.llm.mock_client import MockLLMClient
+from app.core.planning.planner import Planner
+from app.core.planning.repair import PlanRepair
+from app.core.planning.validator import PlanValidator
+from app.core.rag.faiss_store import SimpleInMemoryVectorStore
+from app.core.rag.kb_join import JoinGraphKB
+from app.core.rag.kb_metric import MetricKB
+from app.core.rag.kb_schema import SchemaKB
+from app.core.rag.kb_template import TemplateKB
+from app.core.schema import load_schema
+
+
+def test_llm_non_json_output_rejected():
+    settings = get_settings()
+    schema = load_schema(settings.schema_path)
+
+    schema_kb = SchemaKB(settings.schema_kb_path, SimpleInMemoryVectorStore())
+    join_kb = JoinGraphKB(settings.join_kb_path, SimpleInMemoryVectorStore())
+    metric_kb = MetricKB(settings.metric_kb_path, SimpleInMemoryVectorStore())
+    template_kb = TemplateKB(settings.template_kb_path, SimpleInMemoryVectorStore())
+
+    llm_client = MockLLMClient(force_invalid=True, force_sql=True)
+    validator = PlanValidator(schema)
+    repairer = PlanRepair(llm_client, schema, prompt_path=f"{settings.prompt_dir}/plan_repair.txt")
+
+    planner = Planner(
+        settings=settings,
+        llm_client=llm_client,
+        schema_kb=schema_kb,
+        join_kb=join_kb,
+        metric_kb=metric_kb,
+        template_kb=template_kb,
+        validator=validator,
+        repairer=repairer,
+        prompt_path=f"{settings.prompt_dir}/plan_generate.txt",
+    )
+
+    with pytest.raises(ValueError):
+        planner.generate_plan("test question", {"role": "analyst"}, None)
+
+
+==================================================
+FILE PATH: tests\test_schema_validation.py
+==================================================
+from app.core.schema import load_schema, validate_plan
+
+
+def test_schema_validation_missing_fields():
+    schema = load_schema("schemas/plan_dsl.schema.json")
+    invalid_plan = {"version": "1.0"}
+    errors = validate_plan(invalid_plan, schema)
+    assert errors

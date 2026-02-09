@@ -1,0 +1,104 @@
+[
+  {
+    "join_path_id": "bills_meters",
+    "description": "bills to meters",
+    "tables": [
+      "bills",
+      "meters"
+    ],
+    "edges": [
+      {
+        "left_table": "bills",
+        "left_field": "meter_id",
+        "right_table": "meters",
+        "right_field": "meter_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "bills_users",
+    "description": "bills to users",
+    "tables": [
+      "bills",
+      "users"
+    ],
+    "edges": [
+      {
+        "left_table": "bills",
+        "left_field": "user_id",
+        "right_table": "users",
+        "right_field": "user_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "electricity_records_meters",
+    "description": "electricity_records to meters",
+    "tables": [
+      "electricity_records",
+      "meters"
+    ],
+    "edges": [
+      {
+        "left_table": "electricity_records",
+        "left_field": "meter_id",
+        "right_table": "meters",
+        "right_field": "meter_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "meters_users",
+    "description": "meters to users",
+    "tables": [
+      "meters",
+      "users"
+    ],
+    "edges": [
+      {
+        "left_table": "meters",
+        "left_field": "user_id",
+        "right_table": "users",
+        "right_field": "user_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "payment_records_bills",
+    "description": "payment_records to bills",
+    "tables": [
+      "payment_records",
+      "bills"
+    ],
+    "edges": [
+      {
+        "left_table": "payment_records",
+        "left_field": "bill_id",
+        "right_table": "bills",
+        "right_field": "bill_id",
+        "join_type": "inner"
+      }
+    ]
+  },
+  {
+    "join_path_id": "payment_records_users",
+    "description": "payment_records to users",
+    "tables": [
+      "payment_records",
+      "users"
+    ],
+    "edges": [
+      {
+        "left_table": "payment_records",
+        "left_field": "user_id",
+        "right_table": "users",
+        "right_field": "user_id",
+        "join_type": "inner"
+      }
+    ]
+  }
+]

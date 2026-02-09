@@ -1,0 +1,71 @@
+[
+  {
+    "template_id": "trend_template",
+    "intent": "trend",
+    "allowed_aggs": [
+      "sum",
+      "avg",
+      "max",
+      "min"
+    ],
+    "allowed_funcs": [
+      "date_format",
+      "yearweek",
+      "from_unixtime",
+      "unix_timestamp"
+    ],
+    "required_clauses": [
+      "time_range",
+      "time_grain",
+      "group_by_time"
+    ]
+  },
+  {
+    "template_id": "rank_template",
+    "intent": "rank",
+    "allowed_aggs": [
+      "sum",
+      "avg",
+      "max",
+      "min"
+    ],
+    "allowed_funcs": [],
+    "required_clauses": [
+      "order_by",
+      "limit"
+    ]
+  },
+  {
+    "template_id": "aggregate_template",
+    "intent": "aggregate",
+    "allowed_aggs": [
+      "sum",
+      "avg",
+      "max",
+      "min"
+    ],
+    "allowed_funcs": [],
+    "required_clauses": [
+      "time_range"
+    ]
+  },
+  {
+    "template_id": "compare_template",
+    "intent": "compare",
+    "allowed_aggs": [
+      "sum",
+      "avg",
+      "max",
+      "min"
+    ],
+    "allowed_funcs": [
+      "date_format",
+      "yearweek",
+      "from_unixtime",
+      "unix_timestamp"
+    ],
+    "required_clauses": [
+      "time_range"
+    ]
+  }
+]

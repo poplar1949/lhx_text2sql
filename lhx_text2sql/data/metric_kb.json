@@ -1,0 +1,1146 @@
+[
+  {
+    "metric_id": "sum_bills_bill_id",
+    "name": "sum_bill_id",
+    "definition": "SUM of bills.bill_id",
+    "formula": "SUM(bill_id)",
+    "required_fields": [
+      "bills.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_bill_id",
+    "name": "avg_bill_id",
+    "definition": "AVG of bills.bill_id",
+    "formula": "AVG(bill_id)",
+    "required_fields": [
+      "bills.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_bill_id",
+    "name": "max_bill_id",
+    "definition": "MAX of bills.bill_id",
+    "formula": "MAX(bill_id)",
+    "required_fields": [
+      "bills.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_bill_id",
+    "name": "min_bill_id",
+    "definition": "MIN of bills.bill_id",
+    "formula": "MIN(bill_id)",
+    "required_fields": [
+      "bills.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_bills_user_id",
+    "name": "sum_user_id",
+    "definition": "SUM of bills.user_id",
+    "formula": "SUM(user_id)",
+    "required_fields": [
+      "bills.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_user_id",
+    "name": "avg_user_id",
+    "definition": "AVG of bills.user_id",
+    "formula": "AVG(user_id)",
+    "required_fields": [
+      "bills.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_user_id",
+    "name": "max_user_id",
+    "definition": "MAX of bills.user_id",
+    "formula": "MAX(user_id)",
+    "required_fields": [
+      "bills.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_user_id",
+    "name": "min_user_id",
+    "definition": "MIN of bills.user_id",
+    "formula": "MIN(user_id)",
+    "required_fields": [
+      "bills.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_bills_meter_id",
+    "name": "sum_meter_id",
+    "definition": "SUM of bills.meter_id",
+    "formula": "SUM(meter_id)",
+    "required_fields": [
+      "bills.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_meter_id",
+    "name": "avg_meter_id",
+    "definition": "AVG of bills.meter_id",
+    "formula": "AVG(meter_id)",
+    "required_fields": [
+      "bills.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_meter_id",
+    "name": "max_meter_id",
+    "definition": "MAX of bills.meter_id",
+    "formula": "MAX(meter_id)",
+    "required_fields": [
+      "bills.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_meter_id",
+    "name": "min_meter_id",
+    "definition": "MIN of bills.meter_id",
+    "formula": "MIN(meter_id)",
+    "required_fields": [
+      "bills.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_bills_total_consumption",
+    "name": "sum_total_consumption",
+    "definition": "SUM of bills.total_consumption",
+    "formula": "SUM(total_consumption)",
+    "required_fields": [
+      "bills.total_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_total_consumption",
+    "name": "avg_total_consumption",
+    "definition": "AVG of bills.total_consumption",
+    "formula": "AVG(total_consumption)",
+    "required_fields": [
+      "bills.total_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_total_consumption",
+    "name": "max_total_consumption",
+    "definition": "MAX of bills.total_consumption",
+    "formula": "MAX(total_consumption)",
+    "required_fields": [
+      "bills.total_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_total_consumption",
+    "name": "min_total_consumption",
+    "definition": "MIN of bills.total_consumption",
+    "formula": "MIN(total_consumption)",
+    "required_fields": [
+      "bills.total_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_bills_total_amount",
+    "name": "sum_total_amount",
+    "definition": "SUM of bills.total_amount",
+    "formula": "SUM(total_amount)",
+    "required_fields": [
+      "bills.total_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_bills_total_amount",
+    "name": "avg_total_amount",
+    "definition": "AVG of bills.total_amount",
+    "formula": "AVG(total_amount)",
+    "required_fields": [
+      "bills.total_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_bills_total_amount",
+    "name": "max_total_amount",
+    "definition": "MAX of bills.total_amount",
+    "formula": "MAX(total_amount)",
+    "required_fields": [
+      "bills.total_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_bills_total_amount",
+    "name": "min_total_amount",
+    "definition": "MIN of bills.total_amount",
+    "formula": "MIN(total_amount)",
+    "required_fields": [
+      "bills.total_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_price_id",
+    "name": "sum_price_id",
+    "definition": "SUM of electricity_prices.price_id",
+    "formula": "SUM(price_id)",
+    "required_fields": [
+      "electricity_prices.price_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_price_id",
+    "name": "avg_price_id",
+    "definition": "AVG of electricity_prices.price_id",
+    "formula": "AVG(price_id)",
+    "required_fields": [
+      "electricity_prices.price_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_price_id",
+    "name": "max_price_id",
+    "definition": "MAX of electricity_prices.price_id",
+    "formula": "MAX(price_id)",
+    "required_fields": [
+      "electricity_prices.price_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_price_id",
+    "name": "min_price_id",
+    "definition": "MIN of electricity_prices.price_id",
+    "formula": "MIN(price_id)",
+    "required_fields": [
+      "electricity_prices.price_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_tier_level",
+    "name": "sum_tier_level",
+    "definition": "SUM of electricity_prices.tier_level",
+    "formula": "SUM(tier_level)",
+    "required_fields": [
+      "electricity_prices.tier_level"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_tier_level",
+    "name": "avg_tier_level",
+    "definition": "AVG of electricity_prices.tier_level",
+    "formula": "AVG(tier_level)",
+    "required_fields": [
+      "electricity_prices.tier_level"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_tier_level",
+    "name": "max_tier_level",
+    "definition": "MAX of electricity_prices.tier_level",
+    "formula": "MAX(tier_level)",
+    "required_fields": [
+      "electricity_prices.tier_level"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_tier_level",
+    "name": "min_tier_level",
+    "definition": "MIN of electricity_prices.tier_level",
+    "formula": "MIN(tier_level)",
+    "required_fields": [
+      "electricity_prices.tier_level"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_min_consumption",
+    "name": "sum_min_consumption",
+    "definition": "SUM of electricity_prices.min_consumption",
+    "formula": "SUM(min_consumption)",
+    "required_fields": [
+      "electricity_prices.min_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_min_consumption",
+    "name": "avg_min_consumption",
+    "definition": "AVG of electricity_prices.min_consumption",
+    "formula": "AVG(min_consumption)",
+    "required_fields": [
+      "electricity_prices.min_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_min_consumption",
+    "name": "max_min_consumption",
+    "definition": "MAX of electricity_prices.min_consumption",
+    "formula": "MAX(min_consumption)",
+    "required_fields": [
+      "electricity_prices.min_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_min_consumption",
+    "name": "min_min_consumption",
+    "definition": "MIN of electricity_prices.min_consumption",
+    "formula": "MIN(min_consumption)",
+    "required_fields": [
+      "electricity_prices.min_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_max_consumption",
+    "name": "sum_max_consumption",
+    "definition": "SUM of electricity_prices.max_consumption",
+    "formula": "SUM(max_consumption)",
+    "required_fields": [
+      "electricity_prices.max_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_max_consumption",
+    "name": "avg_max_consumption",
+    "definition": "AVG of electricity_prices.max_consumption",
+    "formula": "AVG(max_consumption)",
+    "required_fields": [
+      "electricity_prices.max_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_max_consumption",
+    "name": "max_max_consumption",
+    "definition": "MAX of electricity_prices.max_consumption",
+    "formula": "MAX(max_consumption)",
+    "required_fields": [
+      "electricity_prices.max_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_max_consumption",
+    "name": "min_max_consumption",
+    "definition": "MIN of electricity_prices.max_consumption",
+    "formula": "MIN(max_consumption)",
+    "required_fields": [
+      "electricity_prices.max_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_unit_price",
+    "name": "sum_unit_price",
+    "definition": "SUM of electricity_prices.unit_price",
+    "formula": "SUM(unit_price)",
+    "required_fields": [
+      "electricity_prices.unit_price"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_unit_price",
+    "name": "avg_unit_price",
+    "definition": "AVG of electricity_prices.unit_price",
+    "formula": "AVG(unit_price)",
+    "required_fields": [
+      "electricity_prices.unit_price"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_unit_price",
+    "name": "max_unit_price",
+    "definition": "MAX of electricity_prices.unit_price",
+    "formula": "MAX(unit_price)",
+    "required_fields": [
+      "electricity_prices.unit_price"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_unit_price",
+    "name": "min_unit_price",
+    "definition": "MIN of electricity_prices.unit_price",
+    "formula": "MIN(unit_price)",
+    "required_fields": [
+      "electricity_prices.unit_price"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_prices_is_current",
+    "name": "sum_is_current",
+    "definition": "SUM of electricity_prices.is_current",
+    "formula": "SUM(is_current)",
+    "required_fields": [
+      "electricity_prices.is_current"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_prices_is_current",
+    "name": "avg_is_current",
+    "definition": "AVG of electricity_prices.is_current",
+    "formula": "AVG(is_current)",
+    "required_fields": [
+      "electricity_prices.is_current"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_prices_is_current",
+    "name": "max_is_current",
+    "definition": "MAX of electricity_prices.is_current",
+    "formula": "MAX(is_current)",
+    "required_fields": [
+      "electricity_prices.is_current"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_prices_is_current",
+    "name": "min_is_current",
+    "definition": "MIN of electricity_prices.is_current",
+    "formula": "MIN(is_current)",
+    "required_fields": [
+      "electricity_prices.is_current"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_record_id",
+    "name": "sum_record_id",
+    "definition": "SUM of electricity_records.record_id",
+    "formula": "SUM(record_id)",
+    "required_fields": [
+      "electricity_records.record_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_record_id",
+    "name": "avg_record_id",
+    "definition": "AVG of electricity_records.record_id",
+    "formula": "AVG(record_id)",
+    "required_fields": [
+      "electricity_records.record_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_record_id",
+    "name": "max_record_id",
+    "definition": "MAX of electricity_records.record_id",
+    "formula": "MAX(record_id)",
+    "required_fields": [
+      "electricity_records.record_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_record_id",
+    "name": "min_record_id",
+    "definition": "MIN of electricity_records.record_id",
+    "formula": "MIN(record_id)",
+    "required_fields": [
+      "electricity_records.record_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_meter_id",
+    "name": "sum_meter_id",
+    "definition": "SUM of electricity_records.meter_id",
+    "formula": "SUM(meter_id)",
+    "required_fields": [
+      "electricity_records.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_meter_id",
+    "name": "avg_meter_id",
+    "definition": "AVG of electricity_records.meter_id",
+    "formula": "AVG(meter_id)",
+    "required_fields": [
+      "electricity_records.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_meter_id",
+    "name": "max_meter_id",
+    "definition": "MAX of electricity_records.meter_id",
+    "formula": "MAX(meter_id)",
+    "required_fields": [
+      "electricity_records.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_meter_id",
+    "name": "min_meter_id",
+    "definition": "MIN of electricity_records.meter_id",
+    "formula": "MIN(meter_id)",
+    "required_fields": [
+      "electricity_records.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_current_reading",
+    "name": "sum_current_reading",
+    "definition": "SUM of electricity_records.current_reading",
+    "formula": "SUM(current_reading)",
+    "required_fields": [
+      "electricity_records.current_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_current_reading",
+    "name": "avg_current_reading",
+    "definition": "AVG of electricity_records.current_reading",
+    "formula": "AVG(current_reading)",
+    "required_fields": [
+      "electricity_records.current_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_current_reading",
+    "name": "max_current_reading",
+    "definition": "MAX of electricity_records.current_reading",
+    "formula": "MAX(current_reading)",
+    "required_fields": [
+      "electricity_records.current_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_current_reading",
+    "name": "min_current_reading",
+    "definition": "MIN of electricity_records.current_reading",
+    "formula": "MIN(current_reading)",
+    "required_fields": [
+      "electricity_records.current_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_previous_reading",
+    "name": "sum_previous_reading",
+    "definition": "SUM of electricity_records.previous_reading",
+    "formula": "SUM(previous_reading)",
+    "required_fields": [
+      "electricity_records.previous_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_previous_reading",
+    "name": "avg_previous_reading",
+    "definition": "AVG of electricity_records.previous_reading",
+    "formula": "AVG(previous_reading)",
+    "required_fields": [
+      "electricity_records.previous_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_previous_reading",
+    "name": "max_previous_reading",
+    "definition": "MAX of electricity_records.previous_reading",
+    "formula": "MAX(previous_reading)",
+    "required_fields": [
+      "electricity_records.previous_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_previous_reading",
+    "name": "min_previous_reading",
+    "definition": "MIN of electricity_records.previous_reading",
+    "formula": "MIN(previous_reading)",
+    "required_fields": [
+      "electricity_records.previous_reading"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_consumption",
+    "name": "sum_consumption",
+    "definition": "SUM of electricity_records.consumption",
+    "formula": "SUM(consumption)",
+    "required_fields": [
+      "electricity_records.consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_consumption",
+    "name": "avg_consumption",
+    "definition": "AVG of electricity_records.consumption",
+    "formula": "AVG(consumption)",
+    "required_fields": [
+      "electricity_records.consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_consumption",
+    "name": "max_consumption",
+    "definition": "MAX of electricity_records.consumption",
+    "formula": "MAX(consumption)",
+    "required_fields": [
+      "electricity_records.consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_consumption",
+    "name": "min_consumption",
+    "definition": "MIN of electricity_records.consumption",
+    "formula": "MIN(consumption)",
+    "required_fields": [
+      "electricity_records.consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_peak_consumption",
+    "name": "sum_peak_consumption",
+    "definition": "SUM of electricity_records.peak_consumption",
+    "formula": "SUM(peak_consumption)",
+    "required_fields": [
+      "electricity_records.peak_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_peak_consumption",
+    "name": "avg_peak_consumption",
+    "definition": "AVG of electricity_records.peak_consumption",
+    "formula": "AVG(peak_consumption)",
+    "required_fields": [
+      "electricity_records.peak_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_peak_consumption",
+    "name": "max_peak_consumption",
+    "definition": "MAX of electricity_records.peak_consumption",
+    "formula": "MAX(peak_consumption)",
+    "required_fields": [
+      "electricity_records.peak_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_peak_consumption",
+    "name": "min_peak_consumption",
+    "definition": "MIN of electricity_records.peak_consumption",
+    "formula": "MIN(peak_consumption)",
+    "required_fields": [
+      "electricity_records.peak_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_electricity_records_valley_consumption",
+    "name": "sum_valley_consumption",
+    "definition": "SUM of electricity_records.valley_consumption",
+    "formula": "SUM(valley_consumption)",
+    "required_fields": [
+      "electricity_records.valley_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_electricity_records_valley_consumption",
+    "name": "avg_valley_consumption",
+    "definition": "AVG of electricity_records.valley_consumption",
+    "formula": "AVG(valley_consumption)",
+    "required_fields": [
+      "electricity_records.valley_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_electricity_records_valley_consumption",
+    "name": "max_valley_consumption",
+    "definition": "MAX of electricity_records.valley_consumption",
+    "formula": "MAX(valley_consumption)",
+    "required_fields": [
+      "electricity_records.valley_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_electricity_records_valley_consumption",
+    "name": "min_valley_consumption",
+    "definition": "MIN of electricity_records.valley_consumption",
+    "formula": "MIN(valley_consumption)",
+    "required_fields": [
+      "electricity_records.valley_consumption"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_meters_meter_id",
+    "name": "sum_meter_id",
+    "definition": "SUM of meters.meter_id",
+    "formula": "SUM(meter_id)",
+    "required_fields": [
+      "meters.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_meters_meter_id",
+    "name": "avg_meter_id",
+    "definition": "AVG of meters.meter_id",
+    "formula": "AVG(meter_id)",
+    "required_fields": [
+      "meters.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_meters_meter_id",
+    "name": "max_meter_id",
+    "definition": "MAX of meters.meter_id",
+    "formula": "MAX(meter_id)",
+    "required_fields": [
+      "meters.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_meters_meter_id",
+    "name": "min_meter_id",
+    "definition": "MIN of meters.meter_id",
+    "formula": "MIN(meter_id)",
+    "required_fields": [
+      "meters.meter_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_meters_user_id",
+    "name": "sum_user_id",
+    "definition": "SUM of meters.user_id",
+    "formula": "SUM(user_id)",
+    "required_fields": [
+      "meters.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_meters_user_id",
+    "name": "avg_user_id",
+    "definition": "AVG of meters.user_id",
+    "formula": "AVG(user_id)",
+    "required_fields": [
+      "meters.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_meters_user_id",
+    "name": "max_user_id",
+    "definition": "MAX of meters.user_id",
+    "formula": "MAX(user_id)",
+    "required_fields": [
+      "meters.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_meters_user_id",
+    "name": "min_user_id",
+    "definition": "MIN of meters.user_id",
+    "formula": "MIN(user_id)",
+    "required_fields": [
+      "meters.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_meters_capacity",
+    "name": "sum_capacity",
+    "definition": "SUM of meters.capacity",
+    "formula": "SUM(capacity)",
+    "required_fields": [
+      "meters.capacity"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_meters_capacity",
+    "name": "avg_capacity",
+    "definition": "AVG of meters.capacity",
+    "formula": "AVG(capacity)",
+    "required_fields": [
+      "meters.capacity"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_meters_capacity",
+    "name": "max_capacity",
+    "definition": "MAX of meters.capacity",
+    "formula": "MAX(capacity)",
+    "required_fields": [
+      "meters.capacity"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_meters_capacity",
+    "name": "min_capacity",
+    "definition": "MIN of meters.capacity",
+    "formula": "MIN(capacity)",
+    "required_fields": [
+      "meters.capacity"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_payment_records_payment_id",
+    "name": "sum_payment_id",
+    "definition": "SUM of payment_records.payment_id",
+    "formula": "SUM(payment_id)",
+    "required_fields": [
+      "payment_records.payment_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_payment_records_payment_id",
+    "name": "avg_payment_id",
+    "definition": "AVG of payment_records.payment_id",
+    "formula": "AVG(payment_id)",
+    "required_fields": [
+      "payment_records.payment_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_payment_records_payment_id",
+    "name": "max_payment_id",
+    "definition": "MAX of payment_records.payment_id",
+    "formula": "MAX(payment_id)",
+    "required_fields": [
+      "payment_records.payment_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_payment_records_payment_id",
+    "name": "min_payment_id",
+    "definition": "MIN of payment_records.payment_id",
+    "formula": "MIN(payment_id)",
+    "required_fields": [
+      "payment_records.payment_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_payment_records_bill_id",
+    "name": "sum_bill_id",
+    "definition": "SUM of payment_records.bill_id",
+    "formula": "SUM(bill_id)",
+    "required_fields": [
+      "payment_records.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_payment_records_bill_id",
+    "name": "avg_bill_id",
+    "definition": "AVG of payment_records.bill_id",
+    "formula": "AVG(bill_id)",
+    "required_fields": [
+      "payment_records.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_payment_records_bill_id",
+    "name": "max_bill_id",
+    "definition": "MAX of payment_records.bill_id",
+    "formula": "MAX(bill_id)",
+    "required_fields": [
+      "payment_records.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_payment_records_bill_id",
+    "name": "min_bill_id",
+    "definition": "MIN of payment_records.bill_id",
+    "formula": "MIN(bill_id)",
+    "required_fields": [
+      "payment_records.bill_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_payment_records_user_id",
+    "name": "sum_user_id",
+    "definition": "SUM of payment_records.user_id",
+    "formula": "SUM(user_id)",
+    "required_fields": [
+      "payment_records.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_payment_records_user_id",
+    "name": "avg_user_id",
+    "definition": "AVG of payment_records.user_id",
+    "formula": "AVG(user_id)",
+    "required_fields": [
+      "payment_records.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_payment_records_user_id",
+    "name": "max_user_id",
+    "definition": "MAX of payment_records.user_id",
+    "formula": "MAX(user_id)",
+    "required_fields": [
+      "payment_records.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_payment_records_user_id",
+    "name": "min_user_id",
+    "definition": "MIN of payment_records.user_id",
+    "formula": "MIN(user_id)",
+    "required_fields": [
+      "payment_records.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_payment_records_payment_amount",
+    "name": "sum_payment_amount",
+    "definition": "SUM of payment_records.payment_amount",
+    "formula": "SUM(payment_amount)",
+    "required_fields": [
+      "payment_records.payment_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_payment_records_payment_amount",
+    "name": "avg_payment_amount",
+    "definition": "AVG of payment_records.payment_amount",
+    "formula": "AVG(payment_amount)",
+    "required_fields": [
+      "payment_records.payment_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_payment_records_payment_amount",
+    "name": "max_payment_amount",
+    "definition": "MAX of payment_records.payment_amount",
+    "formula": "MAX(payment_amount)",
+    "required_fields": [
+      "payment_records.payment_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_payment_records_payment_amount",
+    "name": "min_payment_amount",
+    "definition": "MIN of payment_records.payment_amount",
+    "formula": "MIN(payment_amount)",
+    "required_fields": [
+      "payment_records.payment_amount"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "sum_users_user_id",
+    "name": "sum_user_id",
+    "definition": "SUM of users.user_id",
+    "formula": "SUM(user_id)",
+    "required_fields": [
+      "users.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "avg_users_user_id",
+    "name": "avg_user_id",
+    "definition": "AVG of users.user_id",
+    "formula": "AVG(user_id)",
+    "required_fields": [
+      "users.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "max_users_user_id",
+    "name": "max_user_id",
+    "definition": "MAX of users.user_id",
+    "formula": "MAX(user_id)",
+    "required_fields": [
+      "users.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  },
+  {
+    "metric_id": "min_users_user_id",
+    "name": "min_user_id",
+    "definition": "MIN of users.user_id",
+    "formula": "MIN(user_id)",
+    "required_fields": [
+      "users.user_id"
+    ],
+    "default_time_grain": "day",
+    "unit": ""
+  }
+]
